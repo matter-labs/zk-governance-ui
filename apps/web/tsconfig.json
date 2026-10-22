@@ -1,0 +1,26 @@
+{
+  "extends": "@repo/typescript-config/remix.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./app/*"],
+      "@config/*": ["./config/*"]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "**/.server/**/*.ts",
+    "**/.server/**/*.tsx",
+    "**/.client/**/*.ts",
+    "**/.client/**/*.tsx",
+    "**/*.js",
+    "**/*.mjs",
+    "**/*.cjs"
+  ],
+  "exclude": [
+    "node_modules",
+    "standalone/dist",
+    "standalone/sepolia-test/dist",
+    "standalone/ecosystems/dist-*"
+  ]
+}

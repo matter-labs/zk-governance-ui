@@ -1,0 +1,27 @@
+{
+  "name": "zk-governance-ui",
+  "private": true,
+  "version": "0.1.1",
+  "author": "moonsong-labs",
+  "license": "(MIT OR Apache-2.0)",
+  "scripts": {
+    "build": "turbo build",
+    "test": "turbo test",
+    "check": "biome check",
+    "check:fix": "biome check --write",
+    "typecheck": "turbo typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.8.3",
+    "turbo": "^2.0.14",
+    "typescript": "5.5.4"
+  },
+  "packageManager": "pnpm@9.7.1",
+  "pnpm": {
+    "neverBuiltDependencies": ["bufferutil", "keccak", "utf-8-validate"]
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=8"
+  }
+}
