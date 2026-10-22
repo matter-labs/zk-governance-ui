@@ -32,9 +32,9 @@ jobs:
         with:
           name: verifier-html
           path: |
-            apps/web/standalone/dist/verifier.html
-            apps/web/standalone/sepolia-test/dist/verifier-sepolia-test.html
-            apps/web/standalone/ecosystems/dist-testnet-3/verifier-testnet-3.html
+            dist/verifier.html
+            dist/verifier-sepolia-test.html
+            dist/verifier-testnet-3.html
           if-no-files-found: error
 
   test:

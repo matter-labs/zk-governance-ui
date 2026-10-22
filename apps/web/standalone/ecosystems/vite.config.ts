@@ -5,7 +5,7 @@ import base from "../vite.config";
 
 // The single file for another ZKsync ecosystem's governance (README.md): the same app, with its L1
 // chain's trust anchors, L2 and contract names from <ECOSYSTEM>.json, and keys of its own in the
-// browser. Then inline.mjs makes dist-<ECOSYSTEM>/verifier-<ECOSYSTEM>.html.
+// browser. Then inline.mjs makes dist/verifier-<ECOSYSTEM>.html at the repo root.
 const at = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 const name = process.env.ECOSYSTEM;
 if (!name || !/^[a-z0-9-]+$/.test(name)) throw new Error("Set ECOSYSTEM to a config's name");

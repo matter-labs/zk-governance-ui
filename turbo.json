@@ -3,7 +3,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["standalone/dist/**"]
+      "cache": false
     },
     "typecheck": {},
     "test": {}

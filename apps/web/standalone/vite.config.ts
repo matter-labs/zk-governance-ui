@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
 import type { UserConfig } from "vite";
 
-// The whole site as one file (dist/verifier.html, after inline.mjs): no server, opened from disk.
+// The whole site as one file (dist/verifier.html at the repo root, after inline.mjs): no server,
+// opened from disk.
 const at = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 const shim = (find: string, file: string) => ({ find, replacement: at(`./shims/${file}`) });
 

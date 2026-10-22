@@ -19,7 +19,7 @@ git clone https://github.com/matter-labs/zk-governance-ui.git && cd zk-governanc
 corepack pnpm install && corepack pnpm build
 ```
 
-The file is `apps/web/standalone/dist/verifier.html`.
+The file is `dist/verifier.html`, at the repo root.
 
 ## Use it
 
@@ -44,10 +44,13 @@ Browser extension wallets cannot reach a page opened from disk; any WalletConnec
 
 ## Other builds
 
+Each goes to `dist/` too.
+
 - [Sepolia test deployment](apps/web/standalone/sepolia-test/README.md): governance contracts on Sepolia whose
-  members one address controls, to try signing and executing end to end (`corepack pnpm --filter web build:sepolia-test`).
+  members one address controls, to try signing and executing end to end
+  (`corepack pnpm --filter web build:sepolia-test` → `dist/verifier-sepolia-test.html`).
 - [Another ecosystem](apps/web/standalone/ecosystems/README.md) running the same contracts, from a config
-  (`ECOSYSTEM=testnet-3 corepack pnpm --filter web build:ecosystem`).
+  (`ECOSYSTEM=testnet-3 corepack pnpm --filter web build:ecosystem` → `dist/verifier-testnet-3.html`).
 
 ## Security model
 

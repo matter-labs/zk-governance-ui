@@ -5,7 +5,7 @@ import base from "../vite.config";
 
 // The single file for the governance contracts deployed on Sepolia to test with (README.md): the
 // same app, with Sepolia's trust anchors replaced by deployment.json's (or SEPOLIA_TEST_DEPLOYMENT's)
-// and keys of its own in the browser. Then inline.mjs makes dist/verifier-sepolia-test.html.
+// and keys of its own in the browser. Then inline.mjs makes dist/verifier-sepolia-test.html at the repo root.
 const at = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 const deployment = JSON.parse(
   readFileSync(at(process.env.SEPOLIA_TEST_DEPLOYMENT ?? "./deployment.json"), "utf8")

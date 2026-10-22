@@ -18,15 +18,15 @@ Needs Node.js 20+ (on Node 25+, use `npx pnpm@9.7.1` where these say `corepack p
 
 ```bash
 corepack pnpm install
-corepack pnpm build                                              # apps/web/standalone/dist/verifier.html
-corepack pnpm --filter web build:sepolia-test                    # the Sepolia test deployment's page
-ECOSYSTEM=testnet-3 corepack pnpm --filter web build:ecosystem   # another ecosystem's, from standalone/ecosystems/<name>.json
+corepack pnpm build                                              # dist/verifier.html
+corepack pnpm --filter web build:sepolia-test                    # dist/verifier-sepolia-test.html
+ECOSYSTEM=testnet-3 corepack pnpm --filter web build:ecosystem   # dist/verifier-testnet-3.html, from standalone/ecosystems/testnet-3.json
 ```
 
 The page is the app's route modules under React Router's hash router (`verifier.html#/app/proposals/0x…`). Its
 `.server` modules run in the browser: `standalone/vite.config.ts` swaps Node and Remix modules for the shims in
 `standalone/shims` (settings and caches in `localStorage`), and `standalone/inline.mjs` inlines everything into one
-file.
+file in `dist/` at the repo root.
 
 ## Test
 

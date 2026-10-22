@@ -1,7 +1,7 @@
 # Sepolia test deployment
 
 A copy of ZKsync's governance contracts on Sepolia whose members one address controls, and a build of
-the single file wired to it (`dist/verifier-sepolia-test.html`), to try signing and executing end to
+the single file wired to it (`dist/verifier-sepolia-test.html` at the repo root), to try signing and executing end to
 end. It is not ZKsync's governance: nothing it shows is a real decision. `verifier.html` is
 unchanged by it.
 
@@ -29,7 +29,7 @@ Addresses in `deployment.json`, written by `deploy.ts`.
 
 ## Use it
 
-1. Open `dist/verifier-sepolia-test.html`. In Settings, save a Sepolia RPC with log history (Infura or
+1. Open `dist/verifier-sepolia-test.html` (repo root). In Settings, save a Sepolia RPC with log history (Infura or
    Alchemy) and a Safe API key. The page keeps its own settings, wallet session and payloads
    (`sepolia-test:` keys), apart from `verifier.html`'s.
 2. In Safe{Wallet} on Sepolia, connect `0xF378…E885`: it owns all 17 Safes. Address book → Import
