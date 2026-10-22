@@ -28,8 +28,6 @@ jobs:
     name: Get changed files
     outputs:
       all: ${{ steps.changed-files.outputs.all_any_changed }}
-      webapp: ${{ steps.changed-files.outputs.webapp_any_changed }}
-      cli: ${{ steps.changed-files.outputs.cli_any_changed }}
     steps:
       - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
@@ -42,22 +40,6 @@ jobs:
           files_yaml: |
             all:
               - '**/*'
-              - '!**/*.md'
-              - '!**/*.MD'
-
-            webapp:
-              - 'apps/web/**/*'
-              - 'packages/common/**/*'
-              - 'packages/e2e/**/*'
-              - '!packages/e2e/suites/cli/**/*'
-              - '!**/*.md'
-              - '!**/*.MD'
-
-            cli:
-              - 'apps/cli/**/*'
-              - 'packages/common/**/*'
-              - 'packages/e2e/**/*'
-              - '!packages/e2e/suites/web/**/*'
               - '!**/*.md'
               - '!**/*.MD'
 
@@ -76,37 +58,6 @@ jobs:
   ci-for-test-integration-web:
     name: Integration web
     needs: [changed-files, ci-for-lint, ci-for-test]
-    if: ${{ github.event_name == 'workflow_dispatch' || needs.changed-files.outputs.webapp == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changed-files.outputs.all == 'true' }}
     uses: ./.github/workflows/test-integration-web-reusable.yml
     secrets: inherit
-
-  ci-for-test-e2e-cli:
-    name: Test E2E cli
-    needs: [changed-files, ci-for-lint, ci-for-test]
-    if: ${{ github.event_name == 'workflow_dispatch' || needs.changed-files.outputs.cli == 'true' }}
-    uses: ./.github/workflows/test-e2e-cli-reusable.yml
-    secrets: inherit
-
-  ci-for-test-e2e-web:
-    name: Test E2E web
-    needs: [changed-files, ci-for-lint, ci-for-test]
-    if: ${{ github.event_name == 'workflow_dispatch' || needs.changed-files.outputs.webapp == 'true' }}
-    uses: ./.github/workflows/test-e2e-web-reusable.yml
-    secrets: inherit
-
-  ci-for-docker:
-    name: Docker
-    needs:
-      [
-        changed-files,
-        ci-for-lint,
-        ci-for-test,
-        ci-for-test-integration-web,
-        ci-for-test-e2e-cli,
-        ci-for-test-e2e-web,
-      ]
-    if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.changed-files.outputs.all == 'true') }}
-    uses: ./.github/workflows/docker-reusable.yml
-    permissions:
-      contents: read
-      packages: write

@@ -9,7 +9,7 @@ import { Link } from "@remix-run/react";
 import { CheckCircle2, Clock, Loader2, MinusCircle, Send, XCircle } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "react-hot-toast";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 import type { Hex } from "viem";
 import { useAccount, useSendTransaction } from "wagmi";
 

@@ -9,8 +9,7 @@ session and caches apart from `verifier.html`'s). Everything else is read from t
 From `apps/web`:
 
 ```bash
-ECOSYSTEM=testnet-3 corepack pnpm exec vite build --config standalone/ecosystems/vite.config.ts \
-  && node standalone/inline.mjs standalone/ecosystems/dist-testnet-3 verifier-testnet-3.html
+ECOSYSTEM=testnet-3 corepack pnpm build:ecosystem   # dist-testnet-3/verifier-testnet-3.html
 ```
 
 A config's `codePins` are keccak256 of the runtime code at the Security Council, Guardians and

@@ -50,7 +50,7 @@ From `apps/web`:
 
 ```bash
 # the page
-corepack pnpm exec vite build --config standalone/sepolia-test/vite.config.ts && node standalone/inline.mjs standalone/sepolia-test/dist verifier-sepolia-test.html
+corepack pnpm build:sepolia-test
 # deploy (resumable: what exists is skipped); key in .cache/sepolia-test/deployer.key
 corepack pnpm exec tsx standalone/sepolia-test/deploy.ts
 # one more upgrade, from a JSON file in the emergency payload format

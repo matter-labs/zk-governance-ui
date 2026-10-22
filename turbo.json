@@ -3,12 +3,9 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "build/**", "server-build/**"]
+      "outputs": ["standalone/dist/**"]
     },
     "typecheck": {},
-    "web#typecheck": {
-      "dependsOn": ["web#build"]
-    },
     "test": {}
   },
   "globalPassThroughEnv": ["SKIP_ENV_VALIDATION"]

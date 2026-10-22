@@ -36,7 +36,6 @@ vi.mock("@remix-run/react", () => ({
   useRevalidator: () => ({ revalidate: vi.fn(), state: "idle" }),
   Link: ({ children }: { children: React.ReactNode }) => <a href="/">{children}</a>,
 }));
-vi.mock("remix-routes", () => ({ $path: () => "/" }));
 vi.mock("wagmi", () => ({
   useAccount: () => ({ address: wallet.address, isConnected: !!wallet.address }),
   useSendTransaction: () => ({ sendTransaction: vi.fn(), isPending: false }),

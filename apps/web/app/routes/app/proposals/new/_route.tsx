@@ -22,7 +22,7 @@ import { Meta } from "@/utils/meta";
 import { type LoaderFunctionArgs, defer } from "@remix-run/node";
 import { Await, Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { Suspense } from "react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 import { encodeFunctionData, hexToBigInt, hexToNumber } from "viem";
 
 export const meta = Meta["/app/proposals/new"];

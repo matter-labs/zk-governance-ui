@@ -28,7 +28,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 import { type Hex, formatEther, getAddress, isAddress, isHex, parseEther, toHex } from "viem";
 import { z } from "zod";
 

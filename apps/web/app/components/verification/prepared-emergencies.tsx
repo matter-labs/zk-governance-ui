@@ -19,7 +19,7 @@ import type { SerializeFrom } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import { ArrowRight, Download, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 
 type Summary = SerializeFrom<EmergencySummary>;
 

@@ -28,7 +28,7 @@ import { type LoaderFunctionArgs, type SerializeFrom, defer } from "@remix-run/n
 import { Await, Link, useLoaderData, useNavigate, useNavigation } from "@remix-run/react";
 import { ArrowRight, Check, CheckCircle2, Loader2 } from "lucide-react";
 import { Suspense, createContext, useContext } from "react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 
 export const meta = Meta["/app/proposals"];
 

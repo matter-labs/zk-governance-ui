@@ -1,4 +1,3 @@
-import { respond } from "@/.server/api";
 import { clearCache, invalidate } from "@/.server/cache";
 import { IndexIncomplete } from "@/.server/chain/log-index";
 import { IndexIntegrityError, PuhIndex, puhIndex } from "@/.server/chain/puh-index";
@@ -409,9 +408,6 @@ describe("one upgrade", () => {
     expect(error).toBeInstanceOf(IndexIntegrityError);
     expect(error).not.toBeInstanceOf(UpgradeNotFound);
     expect(String(error)).toContain(upgrade.id);
-    // The JSON API answers 502, not 404.
-    const response = await respond(() => getStandardUpgradeCore(upgrade.id));
-    expect(response.status).toBe(502);
   });
 
   it("asks to retry, without an integrity error, for a start not in the tail yet", async () => {
@@ -465,10 +461,9 @@ describe("one upgrade", () => {
     expect(error).toBeInstanceOf(IndexIncomplete);
     expect(state.headers).toEqual([]);
     expect(chain.queries.filter((q) => q.filter.topics !== undefined)).toEqual([]);
-    expect((await respond(() => getStandardUpgradeCore(upgrade.id))).status).toBe(502);
   });
 
-  it("answers 502, never not found, when the legacy lookup misses a known upgrade", async () => {
+  it("fails, never as not found, when the legacy lookup misses a known upgrade", async () => {
     const history = puhHistory(DEPLOY, FINAL);
     const upgrade = history.upgrades[7] as (typeof history.upgrades)[number];
     upstream({
@@ -483,7 +478,6 @@ describe("one upgrade", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(UpgradeNotFound);
     expect(String(error)).toContain("exists on-chain");
-    expect((await respond(() => getStandardUpgradeCore(upgrade.id))).status).toBe(502);
   });
 
   it("never keeps a start the index read from its tail, even once the boundary passes it", async () => {

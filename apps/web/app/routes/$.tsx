@@ -5,7 +5,7 @@
 // ensure the user gets the right status code and we can display a nicer error
 // message for them than the Remix and/or browser default.
 import { Link } from "@remix-run/react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 
 import { GeneralErrorBoundary } from "@/components/error-boundary";
 import { Separator } from "@/components/ui/separator";

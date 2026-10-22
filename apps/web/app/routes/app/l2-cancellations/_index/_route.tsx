@@ -27,7 +27,7 @@ import { type LoaderFunctionArgs, type SerializeFrom, defer } from "@remix-run/n
 import { Await, Link, useLoaderData } from "@remix-run/react";
 import { ArrowRight } from "lucide-react";
 import { Suspense } from "react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 
 export const meta = Meta["/app/l2-cancellations"];
 

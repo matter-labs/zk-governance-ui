@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@remix-run/react", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a href="/">{children}</a>,
 }));
-vi.mock("remix-routes", () => ({ $path: () => "/" }));
 
 const ID_A = `0x${"a".repeat(64)}`;
 const ID_B = `0x${"b".repeat(64)}`;

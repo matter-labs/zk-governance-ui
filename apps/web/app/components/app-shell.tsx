@@ -45,7 +45,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, Suspense, useCallback, useEffect, useState } from "react";
 import { toast } from "react-hot-toast";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 
 export { useStatus } from "@/components/governance-context";
 

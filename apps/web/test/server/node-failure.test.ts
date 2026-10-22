@@ -2,13 +2,13 @@ import { clearCache } from "@/.server/cache";
 import { puhIndex } from "@/.server/chain/puh-index";
 import { resetRpcClients } from "@/.server/rpc";
 import { type SafeMessage, resetSafeClient } from "@/.server/safe-api";
+import { getStandardUpgrade } from "@/.server/flows/standard";
 import { stopSync } from "@/.server/sync/engine";
 import { resetPresence } from "@/.server/sync/presence";
 import { type UpgradeProposal, encodeUpgradeProposal, upgradeProposalId } from "@/common/proposal";
 import { safeMessageHashes } from "@/common/safe";
 import { buildTypedData, governanceHashes } from "@/common/typed-data";
 import { UPGRADE_STATES } from "@/common/upgrade-states";
-import { loader } from "@/routes/api+/upgrades.$id";
 import { type Hex, numberToHex, pad, zeroAddress } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ChainLog, PUH_TOPICS, blockHash, puhHistory } from "../support/fake-chain";
@@ -17,8 +17,8 @@ import { FakeRpcError, fakeJsonRpc } from "../support/fake-jsonrpc";
 import { L1, SC_MEMBERS, type UpgradeOnChain, fakeL1 } from "../support/fake-l1";
 
 // A node that fails to answer one read for a moment (Infura's -32603 "Internal error" for reads
-// pinned to a block it just named) must not fail a JSON answer: the read is asked again, and the
-// answer is the one a node without the failure gives. A failure is never a verdict either way.
+// pinned to a block it just named) must not fail an answer: the read is asked again, and the answer
+// is the one a node without the failure gives. A failure is never a verdict either way.
 
 const NOW = 1_800_000_000_000;
 const HEAD = 26_129_107n;
@@ -138,16 +138,12 @@ async function settle<T>(promise: Promise<T>): Promise<T> {
   return tracked;
 }
 
-/** GET /api/upgrades/<id>, as `curl` sends it (AGENTS.md), after the boot warm-up's backfill. */
+/** The upgrade's detail, verified at the head, after the start's backfill. */
 async function detail() {
   const index = puhIndex();
   void index.startBackfill();
   await until(() => index.status().state === "ready");
-  const request = new Request(`http://localhost:3000/api/upgrades/${ACTIVE_ID}`);
-  const response = (await settle(
-    Promise.resolve(loader({ params: { id: ACTIVE_ID }, request, context: {} }))
-  )) as Response;
-  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  return settle(getStandardUpgrade(ACTIVE_ID));
 }
 
 type JsonSet = {
@@ -161,8 +157,8 @@ type JsonSet = {
 };
 
 /** What a signer reads from the answer: every set's state, members' verdicts, threshold check. */
-const verdicts = (body: Record<string, unknown>) =>
-  (body.sets as JsonSet[]).map(({ key, state, set }) => ({
+const verdicts = (detail: { sets: unknown }) =>
+  (detail.sets as JsonSet[]).map(({ key, state, set }) => ({
     key,
     state: state.status,
     verifiedAtBlock: set.verifiedAtBlock,
@@ -192,11 +188,10 @@ afterEach(() => {
 });
 
 describe("a read the node fails to answer for a moment (-32603 Internal error)", () => {
-  it("is asked again: the JSON detail is 200 with the verdicts a node without the failure gives", async () => {
+  it("is asked again: the detail has the verdicts a node without the failure gives", async () => {
     world();
     const clean = await detail();
-    expect(clean.status).toBe(200);
-    const council = verdicts(clean.body).find((s) => s.key === "securityCouncil");
+    const council = verdicts(clean).find((s) => s.key === "securityCouncil");
     expect(council).toMatchObject({
       state: "open",
       verifiedAtBlock: HEAD.toString(),
@@ -211,9 +206,7 @@ describe("a read the node fails to answer for a moment (-32603 Internal error)",
     const faulted = await detail();
     expect(failed).toEqual(expect.arrayContaining(["checkSignatures", "signedMessages"]));
     expect(failed).toHaveLength(2);
-    expect(faulted.status).toBe(200);
-    expect(faulted.body.error).toBeUndefined();
-    expect(verdicts(faulted.body)).toEqual(verdicts(clean.body));
+    expect(verdicts(faulted)).toEqual(verdicts(clean));
     // Each failed read was asked again at the same block.
     const atHead = (name: string) =>
       l1.calls.filter(
@@ -224,11 +217,9 @@ describe("a read the node fails to answer for a moment (-32603 Internal error)",
     // The lanes' retries wait in real time: about 2-3 s alone, longer under load.
   }, 20_000);
 
-  it("a node that keeps failing a read still fails the answer (502), never with a verdict", async () => {
+  it("a node that keeps failing a read still fails the answer, never with a verdict", async () => {
     const { l1, failed } = world({ failAlways: ["signedMessages"] });
-    const response = await detail();
-    expect(response.status).toBe(502);
-    expect(response.body).toEqual({ error: expect.stringMatching(/Internal error/) });
+    await expect(detail()).rejects.toThrow(/Internal error/);
     // The read that failed the answer was asked three times (once, then twice again); no read
     // more often. The answer fails with the first one that stood.
     const reads = l1.calls.filter((c) => c.functionName === "signedMessages");

@@ -7,7 +7,7 @@ import {
   useParams,
   useRouteError,
 } from "@remix-run/react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 import { useEffect } from "react";
 import { recoverRouter } from "@/utils/router-recovery";
 

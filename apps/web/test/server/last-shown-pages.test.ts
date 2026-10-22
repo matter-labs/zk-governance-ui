@@ -7,7 +7,6 @@ import { resetContent } from "@/.server/sync/content-engine";
 import { stopSync } from "@/.server/sync/engine";
 import { resetLastShown } from "@/.server/sync/last-shown";
 import { resetPresence } from "@/.server/sync/presence";
-import { loader as upgradesJson } from "@/routes/api+/upgrades._index";
 import { loader as home } from "@/routes/_index/_route";
 import { loader as emergencyPage } from "@/routes/app/emergency/$id/_route";
 import { loader as emergencyList } from "@/routes/app/emergency/_index/_route";
@@ -216,30 +215,5 @@ describe("pages after a pause", () => {
     expect(fresh.signed).toMatchObject({ vetoes: current.signed.vetoes, stale: false });
     expect(fresh.count).toMatchObject({ source: null });
     for (const value of Object.values(fresh)) expect(value).not.toHaveProperty("asOf");
-  });
-
-  it("JSON after the same pause answers only with what it reads at the newest block", async () => {
-    const w = liveWorld();
-    await backfilled();
-    const id = w.upgradeId;
-    await settle(open(upgradeList, "/app/proposals?history=all").list);
-    await settle(open(upgradePage, `/app/proposals/${id}`, { id }).detail);
-    await settle(Promise.resolve());
-
-    await pause(w);
-    const json = async (loader: Loader, path: string, params: Record<string, string> = {}) => {
-      const response = (await settle(
-        Promise.resolve(
-          loader({ request: new Request(`http://localhost${path}`), params, context: {} })
-        )
-      )) as Response;
-      return JSON.stringify(await response.json());
-    };
-    const heads = w.fake.requests("eth_getBlockByNumber").length;
-    const list = await json(upgradesJson, "/api/upgrades?history=all");
-    expect(JSON.parse(list).upgrades.length).toBeGreaterThan(0);
-    expect(list).not.toContain('"asOf"');
-    // It read the newest block for it (nothing kept from the pages stood in).
-    expect(w.fake.requests("eth_getBlockByNumber").length).toBeGreaterThan(heads);
   });
 });

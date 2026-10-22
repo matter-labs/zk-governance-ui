@@ -3,8 +3,7 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./app/*"],
-      "@config/*": ["./config/*"],
-      "@server/*": ["./server/*"]
+      "@config/*": ["./config/*"]
     }
   },
   "include": [
@@ -18,5 +17,10 @@
     "**/*.mjs",
     "**/*.cjs"
   ],
-  "exclude": ["build", "node_modules", "server-build"]
+  "exclude": [
+    "node_modules",
+    "standalone/dist",
+    "standalone/sepolia-test/dist",
+    "standalone/ecosystems/dist-*"
+  ]
 }

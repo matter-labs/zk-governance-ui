@@ -40,7 +40,7 @@ import { type LoaderFunctionArgs, type SerializeFrom, defer } from "@remix-run/n
 import { Await, Link, useAsyncError, useLoaderData } from "@remix-run/react";
 import { type ReactNode, Suspense } from "react";
 import { CheckCircle2, ChevronRight, ExternalLink, XCircle } from "lucide-react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 import { zeroAddress } from "viem";
 
 export const meta = Meta["/app/proposals/:id"];

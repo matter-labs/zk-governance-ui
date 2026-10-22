@@ -46,26 +46,12 @@ node_modules/
 .env.production.local
 .env.local
 
-# Build outputs
+# Build outputs, and local state (saved settings, the chain cache, the Sepolia deploy's cache)
 .cache
-artifacts/
-build/
-cache/
 dist/
-out/
-server-build/
 
-# Remix
-remix-routes.d.ts
+# Vite
 vite.config.ts.*
-
-
-# Hardhat
-**/.hardhat*
-**/test-results/
 
 # Turborepo
 .turbo
-
-# Specific directories
-packages/e2e/playwright-report/

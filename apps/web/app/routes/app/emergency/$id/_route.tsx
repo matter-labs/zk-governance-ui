@@ -63,7 +63,7 @@ import {
 import { Await, useAsyncError, useFetcher, useLoaderData } from "@remix-run/react";
 import { CheckCircle2, Clock, FileJson, XCircle } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 import { type Hex, isAddressEqual } from "viem";
 import { z } from "zod";
 

@@ -38,7 +38,7 @@ import {
 import { Await, Form, Link, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { AlertTriangle, ArrowRight, Ban, Rocket, ShieldAlert, Snowflake } from "lucide-react";
 import { type ReactNode, Suspense, useState } from "react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 import type { Hex } from "viem";
 
 export const meta = Meta["/"];

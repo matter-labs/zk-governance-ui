@@ -5,15 +5,11 @@
   "author": "moonsong-labs",
   "license": "(MIT OR Apache-2.0)",
   "scripts": {
-    "start": "node scripts/start.mjs",
-    "docker:build": "DOCKER_DEFAULT_PLATFORM=linux/amd64 docker build -t upgrade-checker:local .",
     "build": "turbo build",
     "test": "turbo test",
     "check": "biome check",
     "check:fix": "biome check --write",
-    "typecheck": "turbo typecheck",
-    "ci:fix": "turbo ci:fix",
-    "clean": "./scripts/clean.sh"
+    "typecheck": "turbo typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "1.8.3",

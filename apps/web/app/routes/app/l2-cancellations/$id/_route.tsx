@@ -21,7 +21,7 @@ import { Meta } from "@/utils/meta";
 import { type LoaderFunctionArgs, type SerializeFrom, defer } from "@remix-run/node";
 import { Await, useLoaderData } from "@remix-run/react";
 import { Suspense } from "react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 
 export const meta = Meta["/app/l2-cancellations/:id"];
 

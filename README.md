@@ -1,63 +1,82 @@
-# ZKsync Governance
+# ZKsync Governance verifier
 
-Check ZKsync governance actions and their signatures yourself. The web app reads every proposal from the chain
-through **your** RPC, fetches members' signatures from the Safe Transaction Service, and counts a signature only when
-the governance contract itself accepts it in an `eth_call`. It keeps only a local cache of public chain and Safe data
-(its log history is read from the chain again at every start; saved Safe copies are shown with their age until Safe is
-read again) and never posts to Safe.
+Check ZKsync governance actions and their signatures yourself, from one HTML file opened from disk. There is no server:
+the page reads every proposal from the chain through **your** RPC, takes members' signatures from the Safe Transaction
+Service only as candidates, and counts a signature only when the governance contract itself accepts it in an
+`eth_call`. It never posts to Safe, and signs or sends nothing on its own.
 
 It covers protocol upgrades (Security Council and Guardian approval, legal veto extension), emergency upgrades,
 freeze / unfreeze / soft-freeze threshold requests and Guardian vetoes of L2 proposals. For each it shows what is
 signed, the hashes a Safe owner's hardware wallet displays, who has signed, whether the threshold holds, and the
 calldata to execute.
 
-## Run it
+## Get the file
 
-Needs git and Node.js 20 or newer. Use your own Ethereum mainnet or Sepolia RPC with log history (any
-archive RPC works, e.g. `https://mainnet.gateway.tenderly.co`); the network is detected from it.
+Download `verifier.html` from the `verifier-html` artifact of a CI run, or build it. Building needs Node.js 20 or newer:
 
 ```bash
-git clone https://github.com/matter-labs/zk-governance-ui.git && cd zk-governance-ui && L1_RPC_URL=<your RPC URL> npm start
+git clone https://github.com/matter-labs/zk-governance-ui.git && cd zk-governance-ui
+corepack pnpm install && corepack pnpm build
 ```
 
-Then open http://localhost:3000. The same build runs in the CI Docker image:
-`docker build -t zksync-governance . && docker run --rm -p 3000:3000 -e L1_RPC_URL=<your RPC URL> zksync-governance`
+The file is `apps/web/standalone/dist/verifier.html`.
+
+## Use it
+
+Open `verifier.html` in a browser. Until an RPC is saved only **Settings** shows:
+
+| Setting | Use |
+| --- | --- |
+| Ethereum L1 RPC | Required: an Ethereum mainnet or Sepolia RPC with log history (any archive RPC works, e.g. `https://mainnet.gateway.tenderly.co`). The network is detected from it |
+| ZKsync L2 RPC | For vetoes and L2 links (default: the public one) |
+| Safe API key | Without one, Safe allows 2 requests/s and 5,000 a month per IP: enough for one signer |
+| WalletConnect project id | Free at [cloud.reown.com](https://cloud.reown.com); the page has a default |
+
+Settings, the chain cache and payloads you load stay in this browser's storage and nowhere else.
 
 ## Sign
 
-Signing happens in your own Safe and needs no setup. With the app running, open your member Safe in Safe{Wallet}
-and add `http://localhost:3000` as a custom Safe App (**Apps → My custom apps**). When Chrome asks whether
-app.safe.global may access apps on this device, allow it; otherwise Safe{Wallet} reports that the app doesn't
-support Safe Apps. Open it there: it is already connected to your Safe. Go to the action and press **Sign**, then
-compare the hashes on your hardware wallet with the ones on the page (Safe{Wallet} shows the same ones under
-**SafeMessage details**). Once your Safe's owners have confirmed, the signature appears on the page for everyone,
-verified on-chain.
+In the page, **Connect wallet** → copy the WalletConnect link. In Safe{Wallet}, open your member Safe →
+WalletConnect → paste it. **Your signature** then offers that Safe's signature: press **Review and sign**, then
+compare the hashes on your hardware wallet with the ones in the review (Safe{Wallet} shows the same ones under
+**SafeMessage details**). Once your Safe's owners have confirmed, the signature appears on the page, verified on-chain.
+Browser extension wallets cannot reach a page opened from disk; any WalletConnect wallet can send the transactions.
 
-You can also connect your Safe over WalletConnect: start the app with `WALLET_CONNECT_PROJECT_ID` set (free at
-[cloud.reown.com](https://cloud.reown.com)).
+## Other builds
 
-## Optional settings
+- [Sepolia test deployment](apps/web/standalone/sepolia-test/README.md): governance contracts on Sepolia whose
+  members one address controls, to try signing and executing end to end (`corepack pnpm --filter web build:sepolia-test`).
+- [Another ecosystem](apps/web/standalone/ecosystems/README.md) running the same contracts, from a config
+  (`ECOSYSTEM=testnet-3 corepack pnpm --filter web build:ecosystem`).
 
-| Variable | Use |
-| --- | --- |
-| `L2_RPC_URL` | ZKsync Era RPC for vetoes and L2 links (default: the public one) |
-| `WALLET_CONNECT_PROJECT_ID` | Lets members connect their Safe over WalletConnect |
-| `SAFE_WALLET_ORIGINS` | Safe{Wallet} origins that may open the app as a Safe App (default `https://app.safe.global`) |
-| `SAFE_API_KEY` | Safe API key. Without one, Safe allows 2 requests/s and 5,000 a month per IP: enough for one signer, not for a hosted instance |
-| `UPGRADE_HANDLER_ADDRESS`, `SAFE_TX_SERVICE_URL`, `ZK_*_GOVERNOR_ADDRESS` | Overrides for local chains. The app warns when a pinned address is overridden |
-| `CHAIN_CACHE` | `0` turns off the local cache of public chain and Safe data kept between runs in `apps/web/.cache/chain/` (logs, block timestamps, Safe listings; never verdicts, settings or keys). Delete that folder to clear it |
-| `PREWARM` | `0` turns off the reads made once right after the start (network, governance, both log histories and, with a Safe API key, the member Safes' listings, whose messages it then parses); the first pages then make them. The warm-up does not start following the chain |
-| `SYNC_MODE` | `window` (default): follow the chain head only while a page of the app is open and visible in a browser on this machine, re-reading at each new block only what is on screen; nothing is sent upstream while no page is (`/api/*` and `/api/status` read on demand and never count). Measured on mainnet: about 1,600 RPC requests (about 180,000 Infura credits) an hour with a page open. `off`: every request reads on demand |
-| `SYNC_KEEPWARM_MS` | How long a visible tab's last beat (every 10 s) or a page load counts as use (default `30000`) |
-| `SYNC_AWAY_MS` | A visible tab nobody has touched for this long stops counting as use until the next input (default `1800000`, 30 minutes; `0`: never) |
-| `SYNC_SAFE_WATCH_MS` | While a signature set that can still be signed is on screen, the member Safes whose signature is not valid yet are asked this often whether their messages changed (default `60000`; one small request each, the listing only when it changed). Each set also has a **Fetch signatures** button that asks at once |
-| `SYNC_SAFE_LIST_WATCH_MS` | The same for the Safes behind lists on screen: pending emergency upgrades, freeze requests, vetoes (default `300000`; those lists have a **Check Safe now** button) |
-| `SYNC_SAFE_WATCH_KEYLESS_MS` | Without `SAFE_API_KEY` on Safe's public service, the two above at most this often (default `300000`; `0`: only on the buttons) |
-| `SYNC_SAFE_HOURLY_BUDGET` | Most background Safe requests an hour (default `1200`; `0` turns them off). They also slow down when Safe reports little quota left, and pause below 10 % of it. Requests a page, a button or `/api/*` needs are not limited by it |
-| `SYNC_VERDICT_AGGREGATE` | `1` (default): a set's signature checks at a block go out in one Multicall3 call with that block's other reads, and only acceptances are taken from it (anything else is asked again directly). `0`: every check is its own `eth_call` |
-| `SYNC_CREDITS_PER_SECOND` | The most Infura credits a second the chain follower's own requests may use (default `450`; Infura's free plan allows 500; `0`: unpaced). Requests a page or `/api/*` needs are never held up |
+## Security model
 
-[AGENTS.md](AGENTS.md) is for running and checking it with an agent, and running the tests.
-The upgrade verification CLI for deep upgrade analysis lives in [apps/cli](apps/cli/README.md).
+**What you trust.** Your RPC, the ProtocolUpgradeHandler address pinned in `apps/web/app/common/networks.ts`, and the
+file you open. Everything else is derived from the handler through your RPC: councils, members, thresholds, nonces,
+EIP-712 domains. The page checks the contracts against each other and shows a red banner if they disagree.
+
+**What you don't trust.** The Safe Transaction Service. Its answers are only a place to look for signatures. A message
+is used only if it is filed under the hash this page computes for that Safe and that action, and a signature counts
+only once the contract that will consume it (`checkSignatures`, or the Safe's `isValidSignature`) accepts it in an
+`eth_call`. An RPC failure is reported as a failure, never as an invalid signature; a member Safe's API cannot answer
+for is shown as unavailable, never as missing.
+
+**What you check yourself.** Before signing, compare the domain hash and message hash on your hardware wallet with
+the page. They are computed per member Safe and cross-checked against the Safe's on-chain `domainSeparator()`.
+
+**Emergency payloads** are confidential until executed. The page checks a payload against the signed id in this
+browser; it leaves the browser only as an `eth_call` to your RPC when you press **Simulate via your RPC**.
+
+**Incomplete data.** Some RPCs return empty `eth_getLogs` results for old blocks instead of an error. A canary (the
+handler's deployment event) detects this, and the page then warns that lists may be incomplete. Pages opened by id
+still verify, because they read state directly.
+
+## Develop
+
+From the repo root: `corepack pnpm check` (lint), `corepack pnpm typecheck`, `corepack pnpm test` (unit and engine
+tests, no network). From `apps/web`: `corepack pnpm test:i` (read-only against mainnet; `L1_RPC_URL` to choose the
+RPC) and `corepack pnpm test:fork` (signing and execution paths on an anvil fork; needs `anvil`). The call decoder's
+function catalog is regenerated with `apps/web/scripts/import-abis.ts`. [AGENTS.md](AGENTS.md) has the rules for
+working on it with an agent.
 
 Licensed under MIT.

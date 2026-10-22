@@ -47,7 +47,6 @@ const {
   watchKeys,
 } = await import("@/.server/sync/presence");
 const { action } = await import("@/routes/resources+/presence");
-const { shouldSkipLog } = await import("@server/middlewares/logger");
 
 const NOW = 1_800_000_000_000;
 const ORIGIN = "http://localhost:3105";
@@ -384,11 +383,5 @@ describe("POST /resources/presence", () => {
     expect((await post(beatRequest("{not json"))).status).toBe(400);
     expect((await post(beatRequest({ tab: TAB }))).status).toBe(400);
     expect(presence().inUse()).toBe(false);
-  });
-
-  it("is never logged", () => {
-    expect(shouldSkipLog({ method: "POST", path: "/resources/presence" } as never)).toBe(true);
-    expect(shouldSkipLog({ method: "POST", path: "/resources/presence/" } as never)).toBe(true);
-    expect(shouldSkipLog({ method: "GET", path: "/app/proposals", res: {} } as never)).toBe(false);
   });
 });

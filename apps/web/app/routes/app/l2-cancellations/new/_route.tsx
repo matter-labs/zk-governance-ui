@@ -10,7 +10,7 @@ import { Meta } from "@/utils/meta";
 import { type LoaderFunctionArgs, type SerializeFrom, defer } from "@remix-run/node";
 import { Await, useLoaderData, useNavigate } from "@remix-run/react";
 import { Suspense, useState } from "react";
-import { $path } from "remix-routes";
+import { $path } from "@/utils/path";
 import { formatEther, isAddress, parseEther } from "viem";
 import { useAccount } from "wagmi";
 
