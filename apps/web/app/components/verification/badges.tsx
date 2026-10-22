@@ -132,7 +132,7 @@ export function MemberStatusBadge({
         </Badge>
       );
     case "unavailable":
-      return <Badge variant="warning">Safe API unavailable</Badge>;
+      return <Badge variant="warning">Safe API unavailable · not approved on-chain</Badge>;
     default:
       return <Badge variant="neutral">Not signed</Badge>;
   }

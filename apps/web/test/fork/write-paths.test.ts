@@ -13,11 +13,15 @@ import { type ActionName, buildTypedData, governanceHashes } from "@/common/type
 import {
   type Address,
   type Hex,
+  concat,
   encodeAbiParameters,
+  encodeFunctionData,
   getAddress,
   keccak256,
   pad,
+  parseAbi,
   toHex,
+  zeroAddress,
 } from "viem";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { UPGRADE_ID } from "../support/fixtures";
@@ -71,6 +75,34 @@ async function signInSafes(
     });
   }
   return { typedData, digest };
+}
+
+// Safe's SignMessageLib (v1.3.0 on mainnet): a Safe delegatecalls it to approve a message on-chain.
+const SIGN_MESSAGE_LIB = getAddress("0xA65387F16B013cf2Af4605Ad8aA5ec25a2cbA3a2");
+const safeTx = parseAbi([
+  "function execTransaction(address to, uint256 value, bytes data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address refundReceiver, bytes signatures) payable returns (bool)",
+  "function signMessage(bytes _data)",
+]);
+
+/**
+ * `safe` approves `digest` on-chain as a Safe does without Safe's API: its owners execute a
+ * delegatecall to SignMessageLib (here TEST_OWNER, made its owner on the fork, sending it itself).
+ */
+async function approveOnChain(safe: Address, digest: Hex) {
+  await fork.takeOver(safe);
+  // The owner sends the Safe transaction itself: a pre-validated signature (r = owner, v = 1).
+  const signature = concat([pad(TEST_OWNER.address), pad("0x00"), "0x01"]);
+  const data = encodeFunctionData({ abi: safeTx, functionName: "signMessage", args: [digest] });
+  const receipt = await fork.sendAs(
+    TEST_OWNER.address,
+    safe,
+    encodeFunctionData({
+      abi: safeTx,
+      functionName: "execTransaction",
+      args: [SIGN_MESSAGE_LIB, 0n, data, 1, 0n, 0n, 0n, zeroAddress, zeroAddress, signature],
+    })
+  );
+  expect(receipt.status).toBe("success");
 }
 
 describe("on a mainnet fork", () => {
@@ -215,6 +247,90 @@ describe("on a mainnet fork", () => {
       functionName: "nonce",
     });
     expect(nonce).toBe(BigInt(params.nonce) + 1n);
+  });
+
+  it("with Safe's API down, executes a soft freeze its member Safes approved on-chain", async () => {
+    const gov = await governance();
+    const validUntil = String(BigInt(gov.latestBlock.timestamp) + 7n * 86_400n);
+    const message = { nonce: "0", validUntil };
+    const { digest } = governanceHashes(
+      buildTypedData("SoftFreeze", gov.securityCouncil.domain, message)
+    );
+    const approvers = gov.securityCouncil.members.slice(
+      0,
+      gov.securityCouncil.thresholds.softFreeze
+    );
+    for (const safe of approvers) await approveOnChain(safe, digest);
+
+    safeApi.failWith(503);
+    clearCache();
+    const request = await getFreezeRequest({ action: "SoftFreeze", ...message });
+    expect(request.set.safeApiError).toMatch(/503/);
+    expect(request.set.thresholdCheck.status).toBe("met");
+    const valid = request.set.members.filter((m) => m.status === "valid");
+    expect(valid.map((m) => m.member)).toEqual(expect.arrayContaining(approvers));
+    expect(valid.every((m) => m.source === "onchain")).toBe(true);
+    expect(request.execution?.simulation.status).toBe("ok");
+    expect(
+      (await fork.sendAs(sender, request.execution?.to as Address, request.execution?.data as Hex))
+        .status
+    ).toBe("success");
+    clearCache();
+    expect((await governance()).freeze.lastFreezeStatus).toBe(1); // Soft
+  });
+
+  it("with Safe's API down, executes an emergency upgrade every group approved on-chain", async () => {
+    const gov = await governance();
+    const board = gov.emergencyUpgradeBoard;
+    const proposal = {
+      calls: [
+        {
+          target: getAddress("0x000000000000000000000000000000000000dEaD"),
+          value: "0",
+          data: "0x" as Hex,
+        },
+      ],
+      executor: board.address,
+      salt: keccak256(toHex("approved on-chain")),
+    };
+    const id = upgradeProposalId(proposal);
+    const approve = async (action: ActionName, safes: Address[]) => {
+      const { digest } = governanceHashes(buildTypedData(action, board.domain, { id }));
+      for (const safe of safes) await approveOnChain(safe, digest);
+    };
+    await approve(
+      "ExecuteEmergencyUpgradeSecurityCouncil",
+      gov.securityCouncil.members.slice(0, gov.securityCouncil.eip1271Threshold)
+    );
+    await approve(
+      "ExecuteEmergencyUpgradeGuardians",
+      gov.guardians.members.slice(0, gov.guardians.eip1271Threshold)
+    );
+    await approve("ExecuteEmergencyUpgradeZKFoundation", [board.zkFoundation]);
+
+    safeApi.failWith(503);
+    clearCache();
+    const pending = await getEmergencyUpgrade(id);
+    expect(pending.roles.map((r) => r.set.thresholdCheck.status)).toEqual(["met", "met", "met"]);
+    for (const role of pending.roles) {
+      expect(role.set.safeApiError).toMatch(/503/);
+      const valid = role.set.members.filter((m) => m.status === "valid");
+      expect(valid.length).toBeGreaterThan(0);
+      expect(valid.every((m) => m.source === "onchain")).toBe(true);
+    }
+    // The execution carries an empty signature for each: the Safes accept their on-chain approval.
+    const valid = (key: string) => pending.roles.find((r) => r.key === key)?.set.valid ?? [];
+    const execution = emergencyExecution(
+      board.address,
+      proposal,
+      valid("guardians"),
+      valid("securityCouncil"),
+      valid("zkFoundation")[0]?.signature as Hex
+    );
+    expect(await simulate(execution)).toEqual({ status: "ok" });
+    expect((await fork.sendAs(sender, execution.to, execution.data)).status).toBe("success");
+    clearCache();
+    expect((await getEmergencyUpgrade(id)).state).toBe(6);
   });
 
   it("still counts on-chain approvals and supplied signatures when Safe's API is down", async () => {

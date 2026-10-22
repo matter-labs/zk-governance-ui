@@ -647,7 +647,8 @@ function memberStatusText(m: Serialized<MemberResult>, staleAt: string | null) {
     case "invalid":
       return "Rejected";
     case "unavailable":
-      return "Safe API unavailable";
+      // Safe could not be read: the Safe's on-chain approval was checked instead, and there is none.
+      return "Safe API unavailable · not approved on-chain";
     default:
       return "Not signed";
   }
