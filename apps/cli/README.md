@@ -73,13 +73,13 @@ https://book.getfoundry.sh/getting-started/installation
 #### **1. Clone repository**
 
 ```bash
-git clone git@github.com:zksync-association/zksync-upgrade-verification-tool.git
+git clone git@github.com:matter-labs/zk-governance-ui.git
 ```
 
 #### **2. Install dependencies & build**
 
 ```bash
-cd zksync-upgrade-verification-tool
+cd zk-governance-ui
 pnpm install
 pnpm build
 ```

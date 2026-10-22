@@ -1,6 +1,6 @@
 FROM node:20-slim
 
-LABEL org.opencontainers.image.source=https://github.com/zksync-association/zksync-upgrade-verification-tool
+LABEL org.opencontainers.image.source=https://github.com/matter-labs/zk-governance-ui
 
 # Configure pnpm
 ENV PNPM_HOME="/pnpm"

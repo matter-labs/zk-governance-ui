@@ -17,7 +17,7 @@ Needs git and Node.js 20 or newer. Use your own Ethereum mainnet or Sepolia RPC 
 archive RPC works, e.g. `https://mainnet.gateway.tenderly.co`); the network is detected from it.
 
 ```bash
-git clone https://github.com/zksync-association/zksync-upgrade-verification-tool.git && cd zksync-upgrade-verification-tool && L1_RPC_URL=<your RPC URL> npm start
+git clone https://github.com/matter-labs/zk-governance-ui.git && cd zk-governance-ui && L1_RPC_URL=<your RPC URL> npm start
 ```
 
 Then open http://localhost:3000. The same build runs in the CI Docker image:
