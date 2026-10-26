@@ -24,6 +24,15 @@ jobs:
       - run: pnpm install
       # The single-file pages: mainnet, the Sepolia test deployment, and an ecosystem's.
       - run: pnpm build
+      # dist/verifier.html is committed, for people to download: it must be this commit's build.
+      - name: Check the committed dist/verifier.html
+        run: |
+          if [ -n "$(git status --porcelain -- dist/verifier.html)" ]; then
+            echo "::error file=dist/verifier.html::not this commit's build: run corepack pnpm build and commit dist/verifier.html"
+            echo "committed: $(git show HEAD:dist/verifier.html 2>/dev/null | sha256sum)"
+            echo "built:     $(sha256sum < dist/verifier.html)"
+            exit 1
+          fi
       - run: pnpm --filter web build:sepolia-test
       - run: pnpm --filter web build:ecosystem
         env:

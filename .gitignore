@@ -46,9 +46,13 @@ node_modules/
 .env.production.local
 .env.local
 
-# Build outputs, and local state (saved settings, the chain cache, the Sepolia deploy's cache)
+# Build outputs, and local state (saved settings, the chain cache, the Sepolia deploy's cache).
+# dist/verifier.html at the root is kept: it is the file people download, and CI checks it is the commit's build.
 .cache
 dist/
+!/dist/
+/dist/*
+!/dist/verifier.html
 
 # Vite
 vite.config.ts.*

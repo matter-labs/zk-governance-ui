@@ -1,0 +1,3 @@
+# The committed build: kept byte for byte (no line-ending conversion, so its SHA-256 holds on every checkout),
+# never diffed or merged as text (a conflict is settled by rebuilding), and folded away in GitHub's diffs.
+dist/verifier.html binary linguist-generated

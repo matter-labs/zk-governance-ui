@@ -12,22 +12,32 @@ calldata to execute.
 
 ## Get the file
 
-Download `verifier.html` from the `verifier-html` artifact of a CI run, or build it (Node.js 20):
+Download [`dist/verifier.html`](dist/verifier.html) from this repository: on GitHub, open it and press **Download raw
+file** (GitHub shows it as text; the page runs once it is opened from disk), or
+
+```bash
+curl -LO https://raw.githubusercontent.com/matter-labs/zk-governance-ui/main/dist/verifier.html
+```
+
+(`main` can be any commit.) The file in a commit is that commit's build: CI fails a commit whose `dist/verifier.html`
+is not what its sources build. Or build it yourself (Node.js 20):
 
 ```bash
 git clone https://github.com/matter-labs/zk-governance-ui.git && cd zk-governance-ui
 corepack pnpm install && corepack pnpm build
 ```
 
-The file is `dist/verifier.html`, at the repo root.
+The file is `dist/verifier.html`, at the repo root. CI runs also keep it, with the other builds, in their
+`verifier-html` artifact.
 
 ## Check the file
 
-The page is only as trustworthy as the file you open, so check that a `verifier.html` you were sent, or downloaded from
-CI, is exactly what this repository builds. The build is reproducible: the same commit gives a byte-identical file
-wherever it is built (checked on macOS and on CI's Linux), so its SHA-256 must match one you build yourself.
+The page is only as trustworthy as the file you open, so check that a `verifier.html` you downloaded or were sent is
+exactly what this repository builds. The build is reproducible: the same commit gives a byte-identical file wherever it
+is built (checked on macOS and on CI's Linux), so its SHA-256 must match one you build yourself.
 
-1. Get the commit the file was built from, from whoever sent it or from the CI run its artifact came from.
+1. Get the commit the file was built from: the one you downloaded it from, or ask whoever sent it, or take the CI run
+   its artifact came from.
 2. Build that commit yourself with Node.js 20 (the version CI uses; pnpm comes pinned through `corepack`):
 
    ```bash
