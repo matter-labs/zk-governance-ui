@@ -234,6 +234,8 @@ export function fakeL1(options: FakeL1Options) {
         securityCouncil: () => L1.securityCouncil,
         guardians: () => L1.guardians,
         emergencyUpgradeBoard: () => L1.emergencyUpgradeBoard,
+        // Only the handler without Guardians has it (zk-governance #51); mainnet's reverts.
+        zkFoundation: () => REVERT,
         protocolFrozenUntil: () => 0n,
         lastFreezeStatusInUpgradeCycle: () => 0,
         upgradeState: () => upgrades.get(id)?.state ?? 0,

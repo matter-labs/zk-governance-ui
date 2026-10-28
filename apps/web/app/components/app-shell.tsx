@@ -99,6 +99,10 @@ export default function AppShell({
 }) {
   const landed = useLandedStatus(status);
   const ok = landed?.ok ? landed : null;
+  // A handler this build cannot show: no page but Settings either, even one that reads no
+  // governance (a list would show the ZK Foundation's approvals as the Guardians').
+  const onSettings = useLocation().pathname === "/settings";
+  const unsupported = landed && !landed.ok && landed.unsupported && !onSettings ? landed : null;
   // A new root status landed: it answers any request to read it again, and its age starts now.
   useEffect(() => {
     if (ok) noteStatusLanded(ok);
@@ -117,9 +121,13 @@ export default function AppShell({
           <Header wallet={wallet} />
           <Banners />
           <Main>
-            <StatusBoundary source={status} problem={(p) => <StatusProblemCard problem={p} />}>
-              <Suspense fallback={<PagePending />}>{children}</Suspense>
-            </StatusBoundary>
+            {unsupported ? (
+              <StatusProblemCard problem={unsupported} />
+            ) : (
+              <StatusBoundary source={status} problem={(p) => <StatusProblemCard problem={p} />}>
+                <Suspense fallback={<PagePending />}>{children}</Suspense>
+              </StatusBoundary>
+            )}
           </Main>
           <Footer />
           <SettingsButton />

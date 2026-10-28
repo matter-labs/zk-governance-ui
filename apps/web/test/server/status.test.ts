@@ -125,7 +125,10 @@ vi.mock("@/.server/rpc", async (importOriginal) => {
     }),
   };
 });
-vi.mock("@/.server/governance", () => ({ governance: () => state.governance?.() }));
+vi.mock("@/.server/governance", () => ({
+  governance: () => state.governance?.(),
+  UnsupportedHandlerError: class UnsupportedHandlerError extends Error {},
+}));
 vi.mock("@/.server/logs", () => ({ checkLogHistory: async () => state.canary }));
 vi.mock("@/.server/chain/puh-index", () => ({
   puhIndex: () => ({ status: () => state.index, hasCanary: async () => state.inIndex }),
@@ -142,6 +145,7 @@ vi.mock("@/.server/sync/era", () => ({ eraWatchStatus: () => L2 }));
 
 const { appStatus, logHistoryStatus } = await import("@/.server/status");
 const { ConfigError } = await import("@/.server/rpc");
+const { UnsupportedHandlerError } = await import("@/.server/governance");
 
 beforeEach(() => {
   state.governance = async () => ({ warnings: [], network: { overrides: [] } });
@@ -199,6 +203,19 @@ describe("appStatus", () => {
       error: "No pinned ProtocolUpgradeHandler",
       hint: "Check the environment variables in the README.",
     });
+  });
+
+  it("says a handler this build cannot show is one, never an RPC failure, and marks it for the shell", async () => {
+    state.governance = async () => {
+      throw new UnsupportedHandlerError("The ProtocolUpgradeHandler at 0xE30D was upgraded");
+    };
+    const status = await appStatus();
+    expect(status).toMatchObject({
+      ok: false,
+      error: "The ProtocolUpgradeHandler at 0xE30D was upgraded",
+      unsupported: true,
+    });
+    expect(status.ok || status.hint).not.toMatch(/L1_RPC_URL|Check the URL/);
   });
 });
 

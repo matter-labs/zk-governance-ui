@@ -1,7 +1,7 @@
 import { env } from "@config/env.server";
 import { type L2IndexStatus, l2GovernorIndex } from "./chain/l2-index";
 import { type PuhIndexStatus, puhIndex } from "./chain/puh-index";
-import type { Governance } from "./governance";
+import { type Governance, UnsupportedHandlerError } from "./governance";
 import { governanceFor } from "./page-governance";
 import { type LogHistoryStatus, checkLogHistory } from "./logs";
 import { type ChainCacheStatus, chainCacheStatus } from "./persist/chain-cache";
@@ -43,7 +43,13 @@ export type AppStatus =
       clientVersion: string;
       sync: SyncStatus;
     }
-  | { ok: false; error: string; hint: string };
+  | {
+      ok: false;
+      error: string;
+      hint: string;
+      /** The handler runs code this build cannot show (governance.ts UnsupportedHandlerError). */
+      unsupported?: true;
+    };
 
 /** The chain the RPC is on, from network() alone: no governance, no verdict. */
 export type ShellChain = Pick<
@@ -98,6 +104,14 @@ export async function appStatus({
         ok: false,
         error: error.message,
         hint: "Check the environment variables in the README.",
+      };
+    }
+    if (error instanceof UnsupportedHandlerError) {
+      return {
+        ok: false,
+        error: error.message,
+        hint: "Your RPC answered: the governance contracts changed in a way this build cannot show, so it shows none of them.",
+        unsupported: true,
       };
     }
     return {

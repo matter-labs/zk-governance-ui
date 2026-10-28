@@ -9,6 +9,8 @@ export const upgradeHandlerAbi = parseAbi([
   "function securityCouncil() view returns (address)",
   "function guardians() view returns (address)",
   "function emergencyUpgradeBoard() view returns (address)",
+  // Only the handler without Guardians has it (zk-governance #51): asked to tell that one apart.
+  "function zkFoundation() view returns (address)",
   "function L2_PROTOCOL_GOVERNOR() view returns (address)",
   "function upgradeState(bytes32 _id) view returns (uint8)",
   "function upgradeStatus(bytes32 _id) view returns (uint48 creationTimestamp, uint48 securityCouncilApprovalTimestamp, bool guardiansApproval, bool guardiansExtendedLegalVeto, bool executed)",

@@ -1,6 +1,6 @@
 import { clearCache, invalidate } from "@/.server/cache";
 import { UpstreamError } from "@/.server/chain/call";
-import { type Governance, readGovernance } from "@/.server/governance";
+import { type Governance, UnsupportedHandlerError, readGovernance } from "@/.server/governance";
 import { MULTICALL3, latestBlock, network, resetRpcClients } from "@/.server/rpc";
 import { type Address, getAddress, numberToHex } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -216,5 +216,43 @@ describe("governance in one round", () => {
     const again = await measured(() => readGovernance());
     expect(again.rounds).toBeGreaterThan(1);
     expect(again.value).toEqual(first.value);
+  });
+});
+
+describe("a handler this build cannot show", () => {
+  const ZKF = getAddress("0xbC1653bd3829dfEc575AfC3816D4899cd103B51c");
+  // The handler after the Guardians' removal (zk-governance #51): guardians() is gone (it reverts)
+  // and zkFoundation() answers.
+  const withoutGuardians = (call: { to: Address; functionName: string }) =>
+    call.to === L1.upgradeHandler && call.functionName === "guardians"
+      ? REVERTS
+      : call.to === L1.upgradeHandler && call.functionName === "zkFoundation"
+        ? ZKF
+        : undefined;
+
+  it("the handler without Guardians: says so, never an RPC-looking failure (in one round and in rounds)", async () => {
+    await measured(() => readGovernance());
+    options.answer = withoutGuardians;
+    // The last read's layout is guessed first: its aggregate fails, then the rounds tell why.
+    const again = await settle(readGovernance()).catch((error: unknown) => error);
+    expect(again).toBeInstanceOf(UnsupportedHandlerError);
+    expect((again as Error).message).toContain(L1.upgradeHandler);
+    expect((again as Error).message).toContain(ZKF);
+    // A fresh process (rounds only): the same.
+    clearCache();
+    resetRpcClients();
+    node();
+    options.answer = withoutGuardians;
+    await expect(settle(readGovernance())).rejects.toBeInstanceOf(UnsupportedHandlerError);
+  });
+
+  it("today's handler with a failing getter: that failure, not an unsupported handler", async () => {
+    options.inject = (call) =>
+      call.to === L1.upgradeHandler && call.functionName === "guardians"
+        ? new FakeRpcError(-32603, "internal error")
+        : undefined;
+    const error = await settle(readGovernance()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(UnsupportedHandlerError);
   });
 });

@@ -190,6 +190,30 @@ const EUB_GETTERS = [
 const noContract = (net: Network) =>
   new Error(`No contract at ProtocolUpgradeHandler ${net.upgradeHandler} on chain ${net.chainId}`);
 
+/**
+ * The handler runs code this build cannot show: the one without Guardians (zk-governance #51), where
+ * the ZK Foundation approves upgrades, extends the legal veto and co-signs emergencies in their place.
+ * Nothing about it is shown rather than shown as the Guardians'.
+ */
+export class UnsupportedHandlerError extends Error {
+  override name = "UnsupportedHandlerError";
+}
+
+// Why a handler getter failed: the handler without Guardians answers zkFoundation() where
+// guardians() reverts. Asked only once a read failed (one eth_call); else the read's own error.
+async function handlerFailure(net: Network, blockNumber: bigint | undefined, reason: unknown) {
+  const zkFoundation = await callFn<Address>({
+    address: net.upgradeHandler,
+    abi: upgradeHandlerAbi,
+    functionName: "zkFoundation",
+    blockNumber,
+  }).catch(() => null);
+  if (!zkFoundation) return reason;
+  return new UnsupportedHandlerError(
+    `The ProtocolUpgradeHandler at ${net.upgradeHandler} was upgraded: it has no Guardians any more (the ZK Foundation ${getAddress(zkFoundation)} acts in their place). This build of the verifier does not support that handler; use one built for it.`
+  );
+}
+
 // The reads in rounds, at `blockNumber` ('latest' when undefined).
 async function readInRounds(net: Network, blockNumber: bigint | undefined): Promise<Reads> {
   const puh = net.upgradeHandler;
@@ -199,10 +223,9 @@ async function readInRounds(net: Network, blockNumber: bigint | undefined): Prom
   ]);
   // Nothing else is read without contract code at the handler.
   if (!code || code === "0x") throw noContract(net);
-  const values = puhValues.map((settled) => {
-    if (settled.status === "rejected") throw settled.reason;
-    return settled.value;
-  });
+  const failed = puhValues.find((settled) => settled.status === "rejected");
+  if (failed?.status === "rejected") throw await handlerFailure(net, blockNumber, failed.reason);
+  const values = puhValues.map((settled) => (settled as PromiseFulfilledResult<unknown>).value);
   const [scAddress, gAddress, eubAddress, frozenUntil, freezeStatus] = values;
   const sc = getAddress(scAddress as Address);
   const g = getAddress(gAddress as Address);
