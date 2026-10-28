@@ -71,7 +71,10 @@ Open `verifier.html` in a browser. Until an RPC is saved only **Settings** shows
 | Safe API key | Without one, Safe allows 2 requests/s and 5,000 a month per IP: enough for one signer |
 | WalletConnect project id | Free at [cloud.reown.com](https://cloud.reown.com); the page has a default |
 
-Settings, the chain cache and payloads you load stay in this browser's storage and nowhere else.
+Settings and the chain cache stay in this browser's storage, emergency payloads in the tab's (unless you keep one
+after the tab closes). The header names the RPC every read goes through. In Chrome, every page opened from a file
+shares that storage, so any other HTML file you open from disk in the same profile can read and change it, the saved
+RPC included: open `verifier.html` in a browser profile you use only for it. (Firefox keeps files apart.)
 
 ## Sign
 
@@ -109,11 +112,13 @@ for is shown as unavailable, never as missing.
 the page. They are computed per member Safe and cross-checked against the Safe's on-chain `domainSeparator()`.
 
 **Emergency payloads** are confidential until executed. The page checks a payload against the signed id in this
-browser; it leaves the browser only as an `eth_call` to your RPC when you press **Simulate via your RPC**.
+browser and keeps it for the tab only, unless you ask to keep it longer. It leaves the browser only as an `eth_call` to
+your RPC when you press **Simulate via your RPC** or **Check calls via your RPC**; **Fetch in this browser** sends a
+GET to the URL you type.
 
-**Incomplete data.** Some RPCs return empty `eth_getLogs` results for old blocks instead of an error. A canary (the
-handler's deployment event) detects this, and the page then warns that lists may be incomplete. Pages opened by id
-still verify, because they read state directly.
+**Incomplete data.** Some RPCs return empty `eth_getLogs` results for old blocks instead of an error. A canary detects
+this on both chains (on L1 the handler's deployment event, on L2 the first L2 governor proposal), and the page then
+warns that lists may be incomplete. Pages opened by id still verify, because they read state directly.
 
 ## Develop
 
