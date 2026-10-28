@@ -1,4 +1,4 @@
-import { ERC1271_MAGIC_VALUE, guardiansAbi, safeAbi } from "@/common/abis";
+import { guardiansAbi, isErc1271Accepted, safeAbi } from "@/common/abis";
 import { type MemberSignature, encodeMultisigSignature, sortBySigner } from "@/common/execution";
 import { memberLabel } from "@/common/labels";
 import {
@@ -28,6 +28,7 @@ import {
   type CallRequest,
   CallReverted,
   callFn,
+  callRaw,
   classify,
   ethCall,
   isFinalBlock,
@@ -199,6 +200,10 @@ async function pinned<T>(pin: Pin, read: () => Promise<T>): Promise<T> {
   }
 }
 
+/** An answer as a contract response says it: in full up to one word, else its first word. */
+const shortAnswer = (data: Hex) =>
+  data.length <= 66 ? data : `${data.slice(0, 66)}… (${(data.length - 2) / 2} bytes)`;
+
 async function accepts(
   check: SignatureCheck,
   digest: Hex,
@@ -233,7 +238,7 @@ async function accepts(
         : encodeMultisigSignature(signatures);
     const [, result] = await Promise.all([
       requireCode(check.contract, blockNumber, blockHash),
-      callFn<Hex>({
+      callRaw({
         address: check.contract,
         abi: safeAbi,
         functionName: "isValidSignature",
@@ -241,9 +246,9 @@ async function accepts(
         blockNumber,
       }),
     ]);
-    return result === ERC1271_MAGIC_VALUE
+    return isErc1271Accepted(result)
       ? { ok: true }
-      : { ok: false, error: `returned ${result}` };
+      : { ok: false, error: `returned ${shortAnswer(result)}` };
   } catch (error) {
     // Only the contract's own revert rejects. An RPC failure must never read as "signature
     // invalid": let it fail the page instead.

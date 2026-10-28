@@ -136,7 +136,7 @@ vi.mock("@/.server/rpc", () => {
 // The historical EIP-1271 checks are direct eth_calls (chain/call.ts).
 vi.mock("@/.server/chain/call", async (original) => ({
   ...(await original<typeof import("@/.server/chain/call")>()),
-  callFn: async (params: {
+  callRaw: async (params: {
     functionName: string;
     args: string[];
     address: string;
@@ -146,7 +146,8 @@ vi.mock("@/.server/chain/call", async (original) => ({
       throw new Error(`Unexpected ${params.functionName}`);
     state.checks.push(params);
     if (state.historical) throw state.historical;
-    return ERC1271_MAGIC_VALUE;
+    // The whole word, as the contract returns it.
+    return `${ERC1271_MAGIC_VALUE}${"0".repeat(56)}`;
   },
 }));
 vi.mock("@/.server/flows/emergency-event", () => ({

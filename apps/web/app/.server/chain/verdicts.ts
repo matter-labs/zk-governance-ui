@@ -1,4 +1,4 @@
-import { ERC1271_MAGIC_VALUE, guardiansAbi, safeAbi } from "@/common/abis";
+import { guardiansAbi, isErc1271Accepted, safeAbi } from "@/common/abis";
 import { type MemberSignature, encodeMultisigSignature, sortBySigner } from "@/common/execution";
 import { env } from "@config/env.server";
 import { defaultLogger } from "@config/log.server";
@@ -212,17 +212,6 @@ function pinnedSafeAt(safe: Address, head: BlockRef): Promise<boolean> {
   );
 }
 
-const isMagic = (data: Hex) => {
-  try {
-    return (
-      decodeFunctionResult({ abi: safeAbi, functionName: "isValidSignature", data }) ===
-      ERC1271_MAGIC_VALUE
-    );
-  } catch {
-    return false;
-  }
-};
-
 /** "not-accepted" is NOT a rejection: the caller asks directly. */
 export type FastAnswer = "accepted" | "not-accepted" | "not-asked";
 
@@ -283,7 +272,7 @@ export async function fastAccepts(
         : pinnedSafesAt(members, head),
     ]);
     noteAnswered();
-    return answer(result.success && isMagic(result.returnData) && profile);
+    return answer(result.success && isErc1271Accepted(result.returnData) && profile);
   } catch (error) {
     noteFailed(error);
     return "not-accepted";

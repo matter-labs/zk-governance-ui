@@ -1141,7 +1141,36 @@ describe("an RPC failure is never a verdict", () => {
     clearCache();
     state.inject.set("isValidSignature", "0xffffffff");
     const wrong = await run(1, [], check);
-    expect(wrong.members[0]).toMatchObject({ status: "invalid", error: "returned 0xffffffff" });
+    expect(wrong.members[0]).toMatchObject({
+      status: "invalid",
+      error: `returned 0xffffffff${"0".repeat(56)}`,
+    });
+  });
+
+  it("an EIP-1271 answer accepts only when its whole first word is the magic value", async () => {
+    const zkFoundation = MEMBERS[0] as Address;
+    const check = { kind: "safe-1271", contract: zkFoundation } as const;
+    inSafe(zkFoundation, "0xaa");
+    // viem would decode this word as the bytes4 0x1626ba7e; OpenZeppelin's SignatureChecker,
+    // which EmergencyUpgradeBoard uses, compares all 32 bytes and rejects it.
+    state.inject.set("isValidSignature", new RawResult(`0x1626ba7e${"ff".repeat(28)}`));
+    expect((await run(1, [], check)).members[0]?.status).toBe("invalid");
+
+    clearCache();
+    // The magic word, then more: accepted, as OpenZeppelin reads only the first word.
+    state.inject.set(
+      "isValidSignature",
+      new RawResult(`0x1626ba7e${"00".repeat(28)}${"ab".repeat(32)}`)
+    );
+    expect((await run(1, [], check)).members[0]?.status).toBe("valid");
+
+    clearCache();
+    // Shorter than a word: rejected (the contract answered; not an RPC failure).
+    state.inject.set("isValidSignature", new RawResult("0x1626ba7e"));
+    expect((await run(1, [], check)).members[0]).toMatchObject({
+      status: "invalid",
+      error: "returned 0x1626ba7e",
+    });
   });
 
   it("the multisig EIP-1271 threshold check (-32603) fails instead of reading rejected", async () => {

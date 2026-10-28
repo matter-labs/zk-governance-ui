@@ -233,10 +233,8 @@ type FunctionCall = {
  * code: a call to an empty address also "succeeds" (NoContract).
  */
 export async function callFn<T = unknown>(call: FunctionCall): Promise<T> {
-  const { address, abi, functionName, args = [], blockNumber, blockHash } = call;
-  const item = getAbiItem({ abi, name: functionName, args } as never) as AbiFunction | undefined;
-  if (item?.type !== "function") throw new Error(`No function ${functionName} in the ABI`);
-  const data = encodeFunctionData({ abi: [item], functionName, args } as never);
+  const { address, abi, functionName, blockNumber, blockHash } = call;
+  const { item, data } = encodeCall(call);
   if (item.outputs.length === 0) {
     await Promise.all([
       ethCall({ to: address, data, blockNumber }, abi),
@@ -244,15 +242,34 @@ export async function callFn<T = unknown>(call: FunctionCall): Promise<T> {
     ]);
     return undefined as T;
   }
-  const result = await ethCall({ to: address, data, blockNumber }, abi);
-  if (result === "0x")
-    throw new UndecodableResult(`${functionName}() on ${address} returned no data`);
+  const result = await answerOf(call, data);
   try {
     return decodeFunctionResult({ abi: [item], functionName, data: result } as never) as T;
   } catch (cause) {
     const message = `${functionName}() on ${address} returned data that does not decode`;
     throw new UndecodableResult(message, { cause });
   }
+}
+
+/**
+ * callFn's call, its answer as the contract returned it (not decoded, so nothing past the declared
+ * outputs is dropped). Empty data rejects with UndecodableResult, as in callFn.
+ */
+export function callRaw(call: FunctionCall): Promise<Hex> {
+  return answerOf(call, encodeCall(call).data);
+}
+
+function encodeCall({ abi, functionName, args = [] }: FunctionCall) {
+  const item = getAbiItem({ abi, name: functionName, args } as never) as AbiFunction | undefined;
+  if (item?.type !== "function") throw new Error(`No function ${functionName} in the ABI`);
+  return { item, data: encodeFunctionData({ abi: [item], functionName, args } as never) };
+}
+
+async function answerOf({ address, abi, functionName, blockNumber }: FunctionCall, data: Hex) {
+  const result = await ethCall({ to: address, data, blockNumber }, abi);
+  if (result === "0x")
+    throw new UndecodableResult(`${functionName}() on ${address} returned no data`);
+  return result;
 }
 
 // A load-balanced RPC can name a head one of its backends does not have yet; that backend then

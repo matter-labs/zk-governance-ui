@@ -1,4 +1,4 @@
-import { parseAbi } from "viem";
+import { type Hex, parseAbi } from "viem";
 
 // Minimal ABIs for the calls this app makes, written out so they can be reviewed at a glance.
 // Signatures match the deployed contracts (zk-governance l1-contracts) and Safe v1.3.0+.
@@ -110,3 +110,12 @@ export const l1MessengerEventAbi = parseAbi([
 ]);
 
 export const ERC1271_MAGIC_VALUE = "0x1626ba7e" as const;
+
+/**
+ * An isValidSignature answer that accepts, read as OpenZeppelin's SignatureChecker (which
+ * EmergencyUpgradeBoard uses) reads it: at least 32 bytes, the first word the magic value padded
+ * with zeros. A decoded bytes4 would also take a word with other bytes after the selector.
+ */
+export function isErc1271Accepted(data: Hex): boolean {
+  return data.slice(0, 66).toLowerCase() === `${ERC1271_MAGIC_VALUE}${"0".repeat(56)}`;
+}

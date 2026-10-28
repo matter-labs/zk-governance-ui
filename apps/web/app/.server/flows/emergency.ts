@@ -1,6 +1,6 @@
 import {
-  ERC1271_MAGIC_VALUE,
   emergencyUpgradeBoardAbi,
+  isErc1271Accepted,
   safeAbi,
   upgradeHandlerAbi,
 } from "@/common/abis";
@@ -23,7 +23,7 @@ import {
   isAddressEqual,
 } from "viem";
 import { FOREVER, cached, cachedUntil } from "../cache";
-import { CallReverted, callFn, isFinalBlock } from "../chain/call";
+import { CallReverted, callFn, callRaw, isFinalBlock } from "../chain/call";
 import { IndexIntegrityError, type PuhEvent, puhIndex } from "../chain/puh-index";
 import { type Governance, governance } from "../governance";
 import { governanceFor } from "../page-governance";
@@ -904,14 +904,14 @@ async function historicalCheck(
   block: bigint
 ): Promise<HistoricalCheck> {
   try {
-    const result = await callFn<Hex>({
+    const result = await callRaw({
       address,
       abi: safeAbi,
       functionName: "isValidSignature",
       args: [digest, signature],
       blockNumber: block,
     });
-    return { role, accepted: result === ERC1271_MAGIC_VALUE, error: null };
+    return { role, accepted: isErc1271Accepted(result), error: null };
   } catch (error) {
     return error instanceof CallReverted
       ? { role, accepted: false, error: error.reason }
