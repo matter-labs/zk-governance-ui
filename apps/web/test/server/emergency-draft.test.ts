@@ -11,7 +11,12 @@ import { FakeRpcError } from "../support/fake-jsonrpc";
 const PUH = getAddress("0xE30Dca3047B37dc7d88849dE4A4Dc07937ad5Ab3");
 const TARGET: Address = "0x000000000000000000000000000000000000dEaD";
 
-const state = vi.hoisted(() => ({ lane: null as Lane | null, noHead: false }));
+const state = vi.hoisted(() => ({
+  lane: null as Lane | null,
+  noHead: false,
+  // eth_getCode's answer for an address ("0x": no contract), or an error for it.
+  code: (_address: string): unknown => "0x6080",
+}));
 vi.mock("@/.server/rpc", () => ({
   lanes: () => ({ call: state.lane }),
   network: async () => ({ chainId: 1, isDevNode: false }),
@@ -24,15 +29,19 @@ vi.mock("@/.server/governance", () => ({
   governance: async () => ({ upgradeHandler: PUH }),
 }));
 
-const { checkDraftCalls } = await import("@/.server/flows/emergency-draft");
+const { checkDraftCalls, NO_CONTRACT } = await import("@/.server/flows/emergency-draft");
+const { clearCache } = await import("@/.server/cache");
 
 let reply: (index: number) => unknown;
 let calls: ReturnType<typeof fakeCallLane>["calls"];
 
 beforeEach(() => {
+  clearCache();
   state.noHead = false;
+  state.code = () => "0x6080";
   reply = () => "0x";
   const fake = fakeCallLane((call) => {
+    if (call.method === "eth_getCode") return state.code(call.params[0] as string);
     const tx = call.params[0] as { data: string };
     return reply(Number.parseInt(tx.data.slice(2) || "0", 16));
   });
@@ -92,4 +101,27 @@ it("reports an HTTP failure as unchecked, never as a revert", async () => {
     results: [result],
   } = await checkDraftCalls(draft(1));
   expect(result).toMatchObject({ ok: null });
+});
+
+it("says a call to an address without code runs nothing, never that it succeeds", async () => {
+  state.code = () => "0x";
+  const { results } = await checkDraftCalls([
+    { target: TARGET, value: 0n, data: "0xdeadbeef" },
+    { target: TARGET, value: 0n, data: "0x" },
+    // A plain transfer to an account: nothing to run, and nothing wrong.
+    { target: TARGET, value: 1n, data: "0x" },
+  ]);
+  expect(results).toEqual([
+    { ok: null, skipped: NO_CONTRACT },
+    { ok: null, skipped: NO_CONTRACT },
+    { ok: true },
+  ]);
+});
+
+it("reports a failed code read as unchecked, never as a success", async () => {
+  state.code = () => internalError();
+  const {
+    results: [result],
+  } = await checkDraftCalls(draft(1));
+  expect(result).toMatchObject({ ok: null, skipped: expect.stringMatching(/^RPC error: /) });
 });
