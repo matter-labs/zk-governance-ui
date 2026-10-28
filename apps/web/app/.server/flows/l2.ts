@@ -265,11 +265,16 @@ const proposalKey = (governor: Address, id: bigint) => `${governor.toLowerCase()
 const isVetoable = (p: L2ProposalView) =>
   p.state === null || p.state === "Pending" || p.state === "Active";
 
-/** `provisional`: partly from the last run's history; `eraHead`: null when scanned on demand. */
+/**
+ * `provisional`: partly from the last run's history; `eraHead`: null when scanned on demand.
+ * `historyMissing`: the block of a known governor log the Era RPC did not return (the list may
+ * be incomplete); null when it did, or when not checked.
+ */
 export type VetoableAnswer = {
   proposals: L2ProposalView[];
   provisional: boolean;
   eraHead?: { number: string; readAt: string } | null;
+  historyMissing?: string | null;
 };
 
 export const eraHeadOf = (at: L2Head | null) =>
@@ -312,6 +317,7 @@ async function recentFromIndex(
     proposals,
     provisional: read.provisional || recent.provisional,
     eraHead: eraHeadOf(head),
+    historyMissing: read.historyMissing?.toString() ?? null,
   };
 }
 
@@ -357,7 +363,7 @@ export async function activeL2ProposalsAnswer({
           gov,
           page
         )
-      : { proposals: [], provisional: false, eraHead: null },
+      : { proposals: [], provisional: false, eraHead: null, historyMissing: null },
     ...governors
       .filter((g) => !indexed.includes(g))
       .map((g) => recentFromScan(client, g.address, gov)),
@@ -370,6 +376,7 @@ export async function activeL2ProposalsAnswer({
       .filter(isVetoable),
     provisional: fromIndex?.provisional ?? false,
     eraHead: fromIndex?.eraHead ?? null,
+    historyMissing: fromIndex?.historyMissing ?? null,
   };
 }
 
@@ -396,14 +403,18 @@ export async function getL2ProposalAnswer(
   const at = isIndexedL2Governor(net, governor) ? await l2IndexHead(net, { page }) : null;
   if (at) {
     // The index holds every ProposalCreated of this governor up to the head: none for this id
-    // means the governor has no such proposal.
-    const { head, events } = await l2GovernorIndex().read({ head: at });
+    // means the governor has no such proposal, unless the Era RPC's log history is incomplete.
+    const { head, events, historyMissing } = await l2GovernorIndex().read({ head: at });
     const event = events.find(
       (e) =>
         e.eventName === "ProposalCreated" &&
         isAddressEqual(e.governor, governor) &&
         e.proposalId === proposalId
     );
+    if (!event && historyMissing !== null)
+      throw new Error(
+        `The ZKsync Era RPC returned no governor log at block ${historyMissing}, where they start: its log history is incomplete, so the proposal not being in it is no answer`
+      );
     return {
       proposal: event ? await viewOf(client, governor, event.log, head, { gov, page }) : null,
       eraHead: eraHeadOf(head),

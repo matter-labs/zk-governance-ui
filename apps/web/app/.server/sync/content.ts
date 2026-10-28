@@ -77,13 +77,14 @@ export const l2ProposalContent = (p: L2ProposalView | null) =>
 /** The veto list (`list:vetoes`): vetoes signed in Safe with their state, vetoable proposals. */
 export const vetoListContent = (
   signed: Pick<SignedVetoes, "vetoes" | "errors" | "anomalies">,
-  vetoable: Pick<VetoableProposals, "vetoable" | "l2Error">
+  vetoable: Pick<VetoableProposals, "vetoable" | "l2Error" | "historyMissing">
 ) => ({
   vetoes: signed.vetoes,
   errors: signed.errors,
   anomalies: signed.anomalies,
   vetoable: vetoable.vetoable.map(l2ProposalContent),
   l2Error: vetoable.l2Error !== null,
+  l2HistoryMissing: vetoable.historyMissing !== null,
 });
 
 /** A veto page's L2 proposal (`l2:<governor>:<id>`). */

@@ -25,7 +25,7 @@ import {
   toHex,
 } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { blockHash, fakeChain, rawLog } from "../support/fake-chain";
+import { type ChainLog, blockHash, fakeChain, rawLog } from "../support/fake-chain";
 import {
   DAY,
   ERA_URL,
@@ -474,11 +474,16 @@ describe("the L2 governor index", () => {
   });
 
   it("indexes only the pinned governors still in use, and only with an Era RPC", () => {
-    expect(indexedL2Governors(MAINNET)).toEqual({ addresses: [T, G, P], fromBlock: FIRST_LOG });
+    expect(indexedL2Governors(MAINNET)).toEqual({
+      addresses: [T, G, P],
+      fromBlock: FIRST_LOG,
+      canary: FIRST_LOG,
+    });
     const replaced = "0x0000000000000000000000000000000000000e01";
+    // The first log may be the replaced governor's: no canary.
     expect(
       indexedL2Governors({ ...MAINNET, l2Governors: { ...GOVERNORS, token: replaced } })
-    ).toEqual({ addresses: [G, P], fromBlock: FIRST_LOG });
+    ).toEqual({ addresses: [G, P], fromBlock: FIRST_LOG, canary: null });
     expect(indexedL2Governors({ ...MAINNET, l2RpcUrl: null })).toBeNull();
     // Sepolia pins other governors: mainnet's addresses there are read on demand.
     expect(indexedL2Governors(UNPINNED)).toBeNull();
@@ -605,6 +610,44 @@ describe("the flows on the index", () => {
     );
     expect(indexed.vetoable).toHaveLength(3);
     expect(indexed.l2Error).toBeNull();
+    expect(indexed.l2HistoryMissing).toBeNull();
+  });
+
+  it("say the list may be incomplete when the Era RPC lacks the first governor log, and never call a proposal missing then", async () => {
+    // An Era RPC that keeps logs for its last 20 days: older ranges answer [] without an error.
+    const keptFrom = firstBlockAt(headTime - 20n * DAY);
+    const held: { logs: ChainLog[] } = { logs: [] };
+    const { era } = upstream(scenario(), {
+      override: ({ from, to, filter }) => {
+        const topics = ((filter.topics as Hex[][])[0] ?? []).map((t) => t.toLowerCase());
+        const addresses = (filter.address as string[]).map((a) => a.toLowerCase());
+        return held.logs
+          .filter(
+            (log) =>
+              log.blockNumber >= (from > keptFrom ? from : keptFrom) &&
+              log.blockNumber <= to &&
+              addresses.includes(String(log.address).toLowerCase()) &&
+              topics.includes(String(log.topics[0]).toLowerCase())
+          )
+          .map((log) => rawLog({ address: T }, log));
+      },
+    });
+    held.logs = era.chain.options.logs;
+
+    const answer = await activeL2ProposalsAnswer();
+    // 1 of the 3 vetoable proposals, and the list says it may be incomplete.
+    expect(answer.proposals.map((p) => p.description)).toEqual(["in the tail"]);
+    expect(answer.historyMissing).toBe(FIRST_LOG.toString());
+    const list = await listL2Vetoes();
+    expect(list.vetoable).toHaveLength(1);
+    expect(list.l2HistoryMissing).toBe(FIRST_LOG.toString());
+    // A proposal the answer lacks is not "not found" on such an RPC; one in it is still found.
+    await expect(getL2Proposal(T, proposalIdOf("the window's first block"))).rejects.toThrow(
+      /log history is incomplete/
+    );
+    expect(await getL2Proposal(T, proposalIdOf("in the tail"))).toMatchObject({
+      description: "in the tail",
+    });
   });
 
   it("find the startable upgrades the timestamp search found, without searching headers", async () => {

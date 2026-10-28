@@ -450,7 +450,15 @@ describe("a page's first list of vetoes", () => {
     const result = await json;
     expect(result.vetoes.map((v) => v.nonce)).toEqual(["0", "1"]);
     expect(Object.keys(result).sort()).toEqual(
-      ["anomalies", "errors", "governance", "l2Error", "vetoable", "vetoes"].sort()
+      [
+        "anomalies",
+        "errors",
+        "governance",
+        "l2Error",
+        "l2HistoryMissing",
+        "vetoable",
+        "vetoes",
+      ].sort()
     );
   });
 

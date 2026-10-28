@@ -84,6 +84,8 @@ export type VetoableProposals = {
   vetoable: L2ProposalView[];
   /** Why the list could not be read (then `vetoable` is empty and says nothing). null when read. */
   l2Error: string | null;
+  /** The block of a known governor log the Era RPC did not return: the list may be incomplete. */
+  historyMissing: string | null;
   /** A page's first answer from the last run's history; always false in JSON. */
   fromLastRun: boolean;
   eraHead?: { number: string; readAt: string } | null;
@@ -119,15 +121,21 @@ async function signedFrom(gov: Governance, collected: Collected): Promise<Signed
 
 async function vetoableFrom(answer: Promise<VetoableAnswer>): Promise<VetoableProposals> {
   try {
-    const { proposals, provisional, eraHead } = await answer;
+    const { proposals, provisional, eraHead, historyMissing } = await answer;
     return {
       vetoable: proposals,
       l2Error: null,
+      historyMissing: historyMissing ?? null,
       fromLastRun: provisional,
       ...(eraHead !== undefined ? { eraHead } : {}),
     };
   } catch (error) {
-    return { vetoable: [], l2Error: await l2ErrorText(error), fromLastRun: false };
+    return {
+      vetoable: [],
+      l2Error: await l2ErrorText(error),
+      historyMissing: null,
+      fromLastRun: false,
+    };
   }
 }
 
@@ -202,7 +210,7 @@ export async function heldVetoList(): Promise<{
 /** The strict lists together (JSON). */
 export async function listL2Vetoes() {
   const loading = loadL2VetoList();
-  const [gov, signed, { vetoable, l2Error }] = await Promise.all([
+  const [gov, signed, { vetoable, l2Error, historyMissing }] = await Promise.all([
     loading.governance,
     loading.freshSigned,
     loading.freshVetoable,
@@ -211,6 +219,7 @@ export async function listL2Vetoes() {
     vetoes: signed.vetoes,
     vetoable,
     l2Error,
+    l2HistoryMissing: historyMissing,
     errors: signed.errors,
     anomalies: signed.anomalies,
     governance: gov,

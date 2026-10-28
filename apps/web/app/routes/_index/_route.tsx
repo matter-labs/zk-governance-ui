@@ -85,7 +85,11 @@ const freezeCount = (r: FreezeList) => ({
 const vetoCount = ([signed, vetoable]: [SignedVetoes, VetoableProposals]) => ({
   open: signed.vetoes.filter((v) => v.state.status === "open").length,
   vetoable: vetoable.vetoable.length,
-  incomplete: signed.errors.length > 0 || signed.anomalies > 0 || vetoable.l2Error !== null,
+  incomplete:
+    signed.errors.length > 0 ||
+    signed.anomalies > 0 ||
+    vetoable.l2Error !== null ||
+    vetoable.historyMissing !== null,
   source: sourceOf(vetoable.fromLastRun, signed),
 });
 

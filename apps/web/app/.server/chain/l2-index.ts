@@ -39,6 +39,7 @@ import {
 // logs from the first one to the Era head, kept for the settings generation (one eth_getLogs holds
 // mainnet's ~80; each Era head re-reads only the blocks above Era's 'finalized'). Only these three
 // events: the governors also emit a VoteCast per vote, more than an eth_getLogs answer may hold.
+// The first log is pinned: an answer without it says the Era RPC's log history is incomplete.
 
 type L2GovernorEventName = "ProposalCreated" | "ProposalExecuted" | "ProposalCanceled";
 
@@ -70,8 +71,16 @@ export type L2GovernorEvent = {
   provisional: boolean;
 };
 
-/** The Era head the answer is complete at; `provisional`: partly from the last run's history. */
-type L2GovernorRead = { head: L2Head; events: L2GovernorEvent[]; provisional: boolean };
+/**
+ * The Era head the answer is complete at; `provisional`: partly from the last run's history.
+ * `historyMissing`: the pinned first governor log's block, when the answer lacks that log.
+ */
+type L2GovernorRead = {
+  head: L2Head;
+  events: L2GovernorEvent[];
+  provisional: boolean;
+  historyMissing: bigint | null;
+};
 
 type L2Seed = ProvisionalSeed & {
   chainId: number;
@@ -104,21 +113,29 @@ const IDLE: L2IndexStatus = {
 
 type GovernorNetwork = Pick<Network, "chainId" | "l2RpcUrl" | "l2Governors">;
 
-/** The pinned governors in use under `net` (an override keeps the on-demand path), or null. */
+/**
+ * The pinned governors in use under `net` (an override keeps the on-demand path), or null.
+ * `canary`: the pinned first governor log's block, where the index starts. An Era RPC that answers
+ * eth_getLogs for recent blocks only, without an error, leaves it out. Only with every pinned
+ * governor indexed (else the log may be an unindexed governor's).
+ */
 export function indexedL2Governors(
   net: GovernorNetwork
-): { addresses: Address[]; fromBlock: bigint } | null {
+): { addresses: Address[]; fromBlock: bigint; canary: bigint | null } | null {
   const pinned = knownNetwork(net.chainId);
   if (!pinned || !net.l2RpcUrl) return null;
   const fromBlock = pinned.l2GovernorsFirstLogBlock ?? pinned.l2GovernorsDeployBlock;
   if (fromBlock === null) return null;
   const addresses: Address[] = [];
+  let pins = 0;
   for (const kind of ["token", "govOps", "protocol"] as const) {
     const pin = pinned.l2Governors[kind];
     const used = net.l2Governors[kind];
+    if (pin) pins++;
     if (pin && used && isAddressEqual(pin, used)) addresses.push(getAddress(pin));
   }
-  return addresses.length > 0 ? { addresses, fromBlock } : null;
+  const canary = addresses.length === pins ? pinned.l2GovernorsFirstLogBlock : null;
+  return addresses.length > 0 ? { addresses, fromBlock, canary } : null;
 }
 
 export function isIndexedL2Governor(net: GovernorNetwork, governor: Address | null): boolean {
@@ -162,6 +179,7 @@ type Built = {
   key: string;
   chainId: number;
   addresses: Address[];
+  canary: bigint | null;
   index: LogIndex;
   /** Decoded events per log (block hash and log index name one log for good). */
   decoded: Map<string, { eventName: L2GovernorEventName; governor: Address; proposalId: bigint }>;
@@ -201,6 +219,7 @@ class L2GovernorIndex {
         key,
         chainId: net.chainId,
         addresses: covered.addresses,
+        canary: covered.canary,
         decoded: new Map(),
         index: createLogIndex({
           label: LABEL,
@@ -323,7 +342,10 @@ class L2GovernorIndex {
       if (provisionalTo === null) throw error;
       return this.read({ head: at, waitMs, provisional: false });
     }
-    return { head: at, events, provisional: provisionalTo !== null };
+    const { canary } = built;
+    const historyMissing =
+      canary !== null && !logs.some((log) => log.blockNumber === canary) ? canary : null;
+    return { head: at, events, provisional: provisionalTo !== null, historyMissing };
   }
 
   close() {

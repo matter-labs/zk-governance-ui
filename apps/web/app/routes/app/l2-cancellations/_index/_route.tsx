@@ -195,6 +195,16 @@ function VetoableList({
       {!result.fromLastRun && !result.l2Error && (
         <EraBlockNote watchKey="list:vetoes" fallback={result.eraHead ?? null} />
       )}
+      {result.historyMissing && (
+        <p
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 text-sm"
+          data-testid="l2-history-missing"
+        >
+          The ZKsync Era RPC returned nothing for a known governor event at block{" "}
+          {result.historyMissing}, so this list may be incomplete. Use an Era RPC with full log
+          history (Settings).
+        </p>
+      )}
       {result.l2Error ? (
         <EmptyState>
           <span className="block text-amber-900" data-testid="vetoable-unavailable">
@@ -203,7 +213,10 @@ function VetoableList({
           <span className="block text-amber-800 text-sm">ZKsync Era RPC: {result.l2Error}</span>
         </EmptyState>
       ) : result.vetoable.length === 0 ? (
-        <QuietEmpty>No Token or GovOps governor proposal is pending or active.</QuietEmpty>
+        <QuietEmpty incomplete={!!result.historyMissing}>
+          No Token or GovOps governor proposal is pending or active
+          {result.historyMissing && " in what the ZKsync Era RPC returned"}.
+        </QuietEmpty>
       ) : (
         <Vetoable proposals={result.vetoable} />
       )}
