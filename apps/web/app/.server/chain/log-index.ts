@@ -8,7 +8,8 @@ import { asRequestWork } from "../sync/pacer";
 // address alone (a topic OR-list would drop events the ABI does not list, a proxy's Upgraded),
 // unless an index names the topic0 values it keeps (the L2 governors' index skips their votes).
 // Coverage is one contiguous range of final blocks plus a tail (finalizedTo, head] read again for
-// every new head. The backfill fills the final range downward, newest first; a query waits
+// every new head, and made final where two heads' reads agree. The backfill fills the final range
+// downward, newest first; a query waits
 // (bounded) until its range is covered and never answers with a partial list.
 
 /** The head a query is answered at, and the finality boundary F: blocks <= F never change. */
@@ -784,8 +785,8 @@ export function createLogIndex(options: LogIndexOptions): LogIndex {
   const recentSyncs = new Map<string, Promise<Tail>>();
   const RECENT_HEADS = 4;
 
-  // Reads (finalizedTo, head] once per head, one at a time, and promotes what is now final from
-  // that fresh read only; a query answers from its own head's read.
+  // Reads (finalizedTo, head] once per head, one at a time, and promotes what is now final where
+  // that fresh read and the previous head's agree; a query answers from its own head's read.
   function sync(head: IndexHead): Promise<Tail> {
     const key = `${head.head.number}:${head.head.hash.toLowerCase()}`;
     const known = recentSyncs.get(key);
@@ -803,6 +804,11 @@ export function createLogIndex(options: LogIndexOptions): LogIndex {
     return promise;
   }
 
+  // The previous head's read. A backend of a load-balanced RPC that is behind can answer a toBlock
+  // past its own head without an error, leaving out the newest logs, so one read never makes a
+  // block final: two heads' reads must say the same up to it.
+  let lastRead: Range & { logs: IndexedLog[] } = { from: 0n, to: -1n, logs: [] };
+
   async function applyHead({ head, safe }: IndexHead): Promise<Tail> {
     ensureCurrent();
     anchor(safe);
@@ -818,12 +824,24 @@ export function createLogIndex(options: LogIndexOptions): LogIndex {
     }
     // Late results from older settings are never inserted.
     ensureCurrent();
-    const boundary = min(safe, head.number);
+    const previous = lastRead;
+    lastRead = { from, to: head.number, logs };
+    // Up to where the previous read reached too (it started at or below `from`: `top` only rises).
+    const boundary = min(min(safe, head.number), previous.from <= from ? previous.to : top);
     if (boundary > top) {
-      const promoted = logs.filter((log) => log.blockNumber <= boundary);
-      for (const log of promoted) finalKeys.add(keyOf(log));
-      final = [...final, ...promoted];
-      top = boundary;
+      const below = top;
+      const within = (log: IndexedLog) => log.blockNumber > below && log.blockNumber <= boundary;
+      const promoted = logs.filter(within);
+      if (sameLogs(promoted, previous.logs.filter(within))) {
+        for (const log of promoted) finalKeys.add(keyOf(log));
+        final = [...final, ...promoted];
+        top = boundary;
+      } else {
+        defaultLogger.warn(
+          { index: label, from: (below + 1n).toString(), to: boundary.toString() },
+          "Two heads' log reads disagree; the range stays in the tail until they agree"
+        );
+      }
     }
     const read: Tail = { head, logs: logs.filter((log) => log.blockNumber > top) };
     tail = read;

@@ -509,9 +509,15 @@ describe("one upgrade", () => {
     const second = await getStandardUpgradeCore(id);
     expect(second.started.blockNumber).toBe((FINAL + 12n).toString());
     expect(single.mock.calls.filter(([name]) => name === "UpgradeStarted")).toHaveLength(2);
-    // Now read at or below the boundary from a fresh read: kept for good.
+    // At or below the boundary now, but the read before the reorg said otherwise: still the tail.
     await getStandardUpgradeCore(id);
-    expect(single.mock.calls.filter(([name]) => name === "UpgradeStarted")).toHaveLength(2);
+    expect(single.mock.calls.filter(([name]) => name === "UpgradeStarted")).toHaveLength(3);
+    // The next head's read agrees: final, read once more and kept for good.
+    chain.options.head = { number: HEAD + 4n };
+    invalidate("latest-block");
+    await getStandardUpgradeCore(id);
+    await getStandardUpgradeCore(id);
+    expect(single.mock.calls.filter(([name]) => name === "UpgradeStarted")).toHaveLength(4);
   });
 
   it("keeps a final start for good and reads an unfinalized one again", async () => {

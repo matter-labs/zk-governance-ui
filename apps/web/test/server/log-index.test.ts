@@ -15,6 +15,7 @@ import {
   type FakeChainOptions,
   blockHash,
   fakeChain,
+  rawLog,
   spreadLogs,
 } from "../support/fake-chain";
 import { type FakeOptions, FakeRpcError, fakeJsonRpc } from "../support/fake-jsonrpc";
@@ -634,6 +635,47 @@ describe("heads", () => {
     expect((await ctx.index.logs()).map((l) => l.blockNumber)).not.toContain(FINAL + 10n);
     ctx.head.current = { head: { number: H + 40n, hash: blockHash(H + 40n) }, safe: FINAL + 40n };
     expect((await ctx.index.logs()).map((l) => l.blockNumber)).not.toContain(FINAL + 10n);
+  });
+
+  it("never makes a log final from one read: a lagging backend's answer is caught at the next head", async () => {
+    const logs = history();
+    logs.push({ blockNumber: FINAL + 50n, logIndex: 0, topics: [blockHash(7n)] });
+    // A load-balanced backend 160 blocks behind clamps toBlock to its own head, without an error.
+    let lagging: bigint | null = null;
+    const ctx = setup({
+      logs,
+      override: ({ from, to }) =>
+        lagging === null
+          ? undefined
+          : inRange(logs, from, to < lagging ? to : lagging).map((log) =>
+              rawLog({ address: ADDRESS }, log)
+            ),
+    });
+    await ctx.index.startBackfill();
+    expect(await ctx.index.logs()).toHaveLength(99);
+
+    // F moves past the log at a head whose tail read the lagging backend answers.
+    const h1 = H + 100n;
+    lagging = h1 - 160n;
+    ctx.head.current = at(h1);
+    expect(await ctx.index.logs()).toHaveLength(98);
+    expect(ctx.index.status().finalizedTo).toBe(FINAL.toString());
+    lagging = null;
+    // Read again at the next heads: final once two heads' reads agree.
+    ctx.head.current = at(h1 + 20n);
+    expect(await ctx.index.logs()).toHaveLength(99);
+    expect(ctx.index.status().finalizedTo).toBe(FINAL.toString());
+    ctx.head.current = at(h1 + 40n);
+    expect(await ctx.index.logs()).toHaveLength(99);
+    expect(ctx.index.status()).toMatchObject({
+      state: "ready",
+      finalizedTo: (h1 - 40n).toString(),
+    });
+    expect(ctx.index.finalSnapshot()?.logs.map((l) => l.blockNumber)).toContain(FINAL + 50n);
+    // From there on, the promoted range is not read again.
+    ctx.head.current = at(h1 + 60n);
+    await ctx.index.logs();
+    expect(ctx.chain.ranges().at(-1)).toEqual([h1 - 39n, h1 + 60n]);
   });
 
   it("answers a query from the tail read at its own head, never from an older head's", async () => {
