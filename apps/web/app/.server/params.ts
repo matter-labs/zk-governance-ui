@@ -1,5 +1,5 @@
 import { freezeActionFromSlug } from "@/common/freeze";
-import { notFound } from "@/utils/http";
+import { badRequest, notFound } from "@/utils/http";
 import { type Hex, getAddress, isAddress } from "viem";
 import type { FreezeParams } from "./flows/freeze";
 import type { VetoParams } from "./flows/l2-veto";
@@ -8,6 +8,15 @@ import { bytes32Pattern } from "./request";
 // URL → flow parameters, shared by the pages and the JSON API so both run the same checks.
 
 const uint = /^\d{1,78}$/;
+const MAX_UINT256 = (1n << 256n) - 1n;
+
+/** 78 digits can still exceed a uint256: such a value could never be signed or encoded. */
+function requireUint256(values: Record<string, string | undefined>) {
+  for (const [name, value] of Object.entries(values)) {
+    if (value !== undefined && BigInt(value) > MAX_UINT256)
+      throw badRequest(`${name} is above 2^256 − 1, the largest uint256: no request can carry it.`);
+  }
+}
 
 export function parseId(raw: string | undefined): Hex {
   if (!raw || !bytes32Pattern.test(raw)) throw notFound();
@@ -21,6 +30,11 @@ export function parseFreezeParams(slug: string | undefined, url: URL): FreezePar
   const threshold = url.searchParams.get("threshold") ?? undefined;
   if (!action || !uint.test(nonce) || !uint.test(validUntil)) throw notFound();
   if (action === "SetSoftFreezeThreshold" && !uint.test(threshold ?? "")) throw notFound();
+  requireUint256({
+    nonce,
+    validUntil,
+    threshold: action === "SetSoftFreezeThreshold" ? threshold : undefined,
+  });
   return {
     action,
     nonce,
@@ -47,6 +61,7 @@ export function parseVetoParams(id: string | undefined, url: URL): VetoParams {
     !isAddress(refund)
   )
     throw notFound();
+  requireUint256(values);
   return {
     ...values,
     l2GovernorAddress: getAddress(governor),

@@ -36,6 +36,33 @@ describe("URL parameters", () => {
     expect(() => parseVetoParams("0x2a", url)).toThrow();
   });
 
+  it("answers 400 for a value above 2^256 − 1, never a bare 500", async () => {
+    const above = ((1n << 256n) + 7n).toString();
+    const max = ((1n << 256n) - 1n).toString();
+    const freeze = (validUntil: string) =>
+      new URL(`http://x/app/freeze/soft-freeze?nonce=0&validUntil=${validUntil}`);
+    expect(parseFreezeParams("soft-freeze", freeze(max)).validUntil).toBe(max);
+    let thrown: unknown;
+    try {
+      parseFreezeParams("soft-freeze", freeze(above));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(400);
+
+    const veto = new URL(
+      `http://x/?governor=0xb83ff6501214ddf40c91c9565d095400f3f45746&l2GasLimit=${above}&l2GasPerPubdataByteLimit=800&refundRecipient=0xf378708b88841abb63e2316e4fc8f29469bee885&txMintValue=1&nonce=0`
+    );
+    expect(() => parseVetoParams("42", veto)).toThrow();
+    try {
+      parseVetoParams("42", veto);
+    } catch (error) {
+      expect((error as Response).status).toBe(400);
+      expect(await (error as Response).text()).toMatch(/^l2GasLimit is above 2\^256/);
+    }
+  });
+
   it("reads ?sig=<member>:<signature> and skips malformed ones", () => {
     const request = new Request(
       "http://x/?sig=0x34ea62d4b9bbb8ad927efb6ab31e3ab3474ac93a:0xaabb&sig=nonsense&sig=0x34Ea62D4b9bBB8AD927eFB6ab31E3Ab3474aC93a:0xzz"
