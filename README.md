@@ -24,8 +24,11 @@ is not what its sources build. Or build it yourself (Node.js 20):
 
 ```bash
 git clone https://github.com/matter-labs/zk-governance-ui.git && cd zk-governance-ui
-corepack pnpm install && corepack pnpm build
+corepack pnpm install --frozen-lockfile --ignore-scripts && corepack pnpm --filter web build
 ```
+
+(`--ignore-scripts`: the build needs none of the dependencies' install scripts, so none run on the machine you sign
+from.)
 
 The file is `dist/verifier.html`, at the repo root. CI runs also keep it, with the other builds, in their
 `verifier-html` artifact.
@@ -43,7 +46,7 @@ is built (checked on macOS and on CI's Linux), so its SHA-256 must match one you
    ```bash
    git clone https://github.com/matter-labs/zk-governance-ui.git && cd zk-governance-ui
    git checkout <commit>
-   corepack pnpm install --frozen-lockfile && corepack pnpm build
+   corepack pnpm install --frozen-lockfile --ignore-scripts && corepack pnpm --filter web build
    ```
 
 3. Compare the two hashes (on Linux, `sha256sum` in place of `shasum -a 256`):
@@ -92,7 +95,9 @@ Each goes to `dist/` too.
 
 **What you trust.** Your RPC, the ProtocolUpgradeHandler address pinned in `apps/web/app/common/networks.ts`, and the
 file you open. Everything else is derived from the handler through your RPC: councils, members, thresholds, nonces,
-EIP-712 domains. The page checks the contracts against each other and shows a red banner if they disagree.
+EIP-712 domains. The page checks the contracts against each other and shows a red banner if they disagree. Vetoes and
+L2 links also trust the ZKsync L2 RPC (by default ZKsync's public one): it decides which L2 proposals can be vetoed and
+their titles, and sees the ids of the proposals you open.
 
 **What you don't trust.** The Safe Transaction Service. Its answers are only a place to look for signatures. A message
 is used only if it is filed under the hash this page computes for that Safe and that action, and a signature counts
@@ -112,8 +117,8 @@ still verify, because they read state directly.
 
 ## Develop
 
-From the repo root: `corepack pnpm check` (lint), `corepack pnpm typecheck`, `corepack pnpm test` (unit and engine
-tests, no network). From `apps/web`: `corepack pnpm test:i` (read-only against mainnet; `L1_RPC_URL` to choose the
+From the repo root, with `pnpm` on your PATH (`corepack enable` once; turbo looks for it there): `corepack pnpm check`
+(lint), `corepack pnpm typecheck`, `corepack pnpm test` (unit and engine tests, no network). From `apps/web`: `corepack pnpm test:i` (read-only against mainnet; `L1_RPC_URL` to choose the
 RPC) and `corepack pnpm test:fork` (signing and execution paths on an anvil fork; needs `anvil`). The call decoder's
 function catalog is regenerated with `apps/web/scripts/import-abis.ts`. [AGENTS.md](AGENTS.md) has the rules for
 working on it with an agent.

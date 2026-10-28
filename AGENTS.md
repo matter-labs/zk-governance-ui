@@ -9,9 +9,9 @@ How to build this single-file app, change it and run its tests. Read the rules f
 - Report hashes and addresses in full. A signer compares them character by character with their hardware wallet.
 - A signature counts only when the governance contract accepted it in an `eth_call` (`status` `"valid"`). Safe's API
   only supplies candidates; a member it cannot answer for is `"unavailable"`, never `"missing"`.
-- `dist/verifier.html` is committed: it is the file people download. Commit it rebuilt (`corepack pnpm build`) with
-  any change to the app, and never edit it by hand; CI fails a commit whose copy is not its build. The other builds
-  stay out of git.
+- `dist/verifier.html` is committed: it is the file people download. Commit it rebuilt
+  (`corepack pnpm --filter web build`) with any change to the app, and never edit it by hand; CI fails a commit whose
+  copy is not its build. The other builds stay out of git.
 - Never print RPC URLs or API keys, and never commit a key (the Sepolia deployer's lives in
   `apps/web/.cache/sepolia-test/deployer.key`, which is ignored).
 
@@ -21,7 +21,7 @@ Needs Node.js 20+ (on Node 25+, use `npx pnpm@9.7.1` where these say `corepack p
 
 ```bash
 corepack pnpm install
-corepack pnpm build                                              # dist/verifier.html
+corepack pnpm --filter web build                                 # dist/verifier.html (no pnpm on PATH needed)
 corepack pnpm --filter web build:sepolia-test                    # dist/verifier-sepolia-test.html
 ECOSYSTEM=testnet-3 corepack pnpm --filter web build:ecosystem   # dist/verifier-testnet-3.html, from standalone/ecosystems/testnet-3.json
 ```

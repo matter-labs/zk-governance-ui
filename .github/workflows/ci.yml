@@ -4,60 +4,30 @@ on:
   pull_request:
   push:
     branches: ["main", "dev"]
+  # Run workflow builds the branch picked in GitHub's menu: every job checks out that same ref.
   workflow_dispatch:
-    inputs:
-      branch:
-        description: "Branch to build"
-        required: true
-        default: "main"
-        type: choice
-        options:
-          - main
-          - dev
-      commit:
-        description: "Commit SHA to build. If empty, the tip of the branch will be used."
-        required: false
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ format('{0}-{1}', github.workflow, github.event_name == 'workflow_dispatch' && github.event.inputs.branch || github.ref) }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A push to main never cancels the run checking the commit before it: the README says any commit's
+  # dist/verifier.html can be downloaded, so each one keeps its completed check.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  changed-files:
-    runs-on: ubuntu-latest
-    name: Get changed files
-    outputs:
-      all: ${{ steps.changed-files.outputs.all_any_changed }}
-    steps:
-      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.commit || github.event.inputs.branch) || github.ref }}
-
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@c3a1bb2c992d77180ae65be6ae6c166cf40f857c # v45.0.3
-        with:
-          files_yaml: |
-            all:
-              - '**/*'
-              - '!**/*.md'
-              - '!**/*.MD'
-
   ci-for-lint:
     name: Lint
-    needs: [changed-files]
-    if: ${{ github.event_name == 'workflow_dispatch' || needs.changed-files.outputs.all == 'true' }}
     uses: ./.github/workflows/lint-reusable.yml
 
   ci-for-test:
     name: Test
-    needs: [changed-files, ci-for-lint]
-    if: ${{ github.event_name == 'workflow_dispatch' || needs.changed-files.outputs.all == 'true' }}
+    needs: [ci-for-lint]
     uses: ./.github/workflows/test-reusable.yml
 
   ci-for-test-integration-web:
     name: Integration web
-    needs: [changed-files, ci-for-lint, ci-for-test]
-    if: ${{ github.event_name == 'workflow_dispatch' || needs.changed-files.outputs.all == 'true' }}
+    needs: [ci-for-lint, ci-for-test]
     uses: ./.github/workflows/test-integration-web-reusable.yml
     secrets: inherit
