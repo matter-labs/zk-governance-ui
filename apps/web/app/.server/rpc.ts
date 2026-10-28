@@ -61,11 +61,15 @@ const engineOf = (options: LimitedHttpOptions, limit: ReturnType<typeof concurre
   pace: paceAsEngine,
 });
 
+// No client follows a contract's OffchainLookup revert (CCIP-read, EIP-3668): a crafted link to
+// such a contract (a veto page's governor) would make the app fetch URLs that contract picks.
+const readClient = (transport: Transport) => createPublicClient({ transport, ccipRead: false });
+
 let l1Limit = concurrencyLimit(L1_TRANSPORT.maxInFlight);
 let transport = limitedHttp(env.L1_RPC_URL, { ...L1_TRANSPORT, limit: l1Limit });
 let engineTransport = limitedHttp(env.L1_RPC_URL, engineOf(L1_TRANSPORT, l1Limit));
-let direct = createPublicClient({ transport });
-let engineDirect = createPublicClient({ transport: engineTransport });
+let direct = readClient(transport);
+let engineDirect = readClient(engineTransport);
 const makeBatched = (transport: Transport) =>
   createPublicClient({
     chain: {
@@ -79,6 +83,7 @@ const makeBatched = (transport: Transport) =>
     // (chain/call.ts). Up to 64 KB of calldata per aggregate3.
     batch: { multicall: { batchSize: 65_536, wait: 10 } },
     transport,
+    ccipRead: false,
   });
 
 let batched = makeBatched(transport);
@@ -104,9 +109,9 @@ export const l1 = new Proxy({} as PublicClient, {
 let stateLimit = concurrencyLimit(L1_STATE_TRANSPORT.maxInFlight);
 let stateTransport = limitedHttp(env.L1_RPC_URL, { ...L1_STATE_TRANSPORT, limit: stateLimit });
 let stateEngineTransport = limitedHttp(env.L1_RPC_URL, engineOf(L1_STATE_TRANSPORT, stateLimit));
-let stateDirect = createPublicClient({ transport: stateTransport });
+let stateDirect = readClient(stateTransport);
 let stateBatched = makeBatched(stateTransport);
-let stateEngineDirect = createPublicClient({ transport: stateEngineTransport });
+let stateEngineDirect = readClient(stateEngineTransport);
 let stateEngineBatched = makeBatched(stateEngineTransport);
 
 export const l1State = new Proxy({} as PublicClient, {
@@ -242,6 +247,7 @@ export async function l2(): Promise<PublicClient | null> {
     ? (createPublicClient({
         chain: zksync,
         transport: limitedHttp(l2RpcUrl, L2_TRANSPORT),
+        ccipRead: false,
       }) as unknown as PublicClient)
     : null;
   return l2Client;
@@ -907,16 +913,16 @@ export function resetRpcClients() {
   l1Limit = concurrencyLimit(L1_TRANSPORT.maxInFlight);
   transport = limitedHttp(env.L1_RPC_URL, { ...L1_TRANSPORT, limit: l1Limit });
   engineTransport = limitedHttp(env.L1_RPC_URL, engineOf(L1_TRANSPORT, l1Limit));
-  direct = createPublicClient({ transport });
-  engineDirect = createPublicClient({ transport: engineTransport });
+  direct = readClient(transport);
+  engineDirect = readClient(engineTransport);
   batched = makeBatched(transport);
   engineBatched = makeBatched(engineTransport);
   stateLimit = concurrencyLimit(L1_STATE_TRANSPORT.maxInFlight);
   stateTransport = limitedHttp(env.L1_RPC_URL, { ...L1_STATE_TRANSPORT, limit: stateLimit });
   stateEngineTransport = limitedHttp(env.L1_RPC_URL, engineOf(L1_STATE_TRANSPORT, stateLimit));
-  stateDirect = createPublicClient({ transport: stateTransport });
+  stateDirect = readClient(stateTransport);
   stateBatched = makeBatched(stateTransport);
-  stateEngineDirect = createPublicClient({ transport: stateEngineTransport });
+  stateEngineDirect = readClient(stateEngineTransport);
   stateEngineBatched = makeBatched(stateEngineTransport);
   useMulticall = false;
   l2Client = undefined;

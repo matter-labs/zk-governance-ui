@@ -1,4 +1,12 @@
-import { l2HeadLane, l2HistoryLane, lanes, resetRpcClients } from "@/.server/rpc";
+import {
+  l1 as l1Client,
+  l1State,
+  l2,
+  l2HeadLane,
+  l2HistoryLane,
+  lanes,
+  resetRpcClients,
+} from "@/.server/rpc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // network() is read through the cache; this stands in for it so a test can hold it pending.
@@ -103,5 +111,14 @@ describe("l2HistoryLane", () => {
     await expect(l1.history.request("eth_chainId")).rejects.toMatchObject({ kind: "aborted" });
     expect(await l2HeadLane()).not.toBe(head);
     expect(await l2HistoryLane()).not.toBe(history);
+  });
+});
+
+describe("viem clients", () => {
+  it("never follow a contract's OffchainLookup (CCIP-read): no URL a contract picks is fetched", async () => {
+    state.network = async () => ({ l2RpcUrl: "https://l2.invalid" });
+    expect(l1Client.ccipRead).toBe(false);
+    expect(l1State.ccipRead).toBe(false);
+    expect((await l2())?.ccipRead).toBe(false);
   });
 });
