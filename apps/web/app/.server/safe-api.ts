@@ -315,8 +315,13 @@ export async function fetchListing(
       options
     );
     arrivedAt ??= answer.arrivedAt;
-    if (answer.body === null)
-      return { messages, complete: true, count: messages.length, arrivedAt };
+    // A 404 for the first page: Safe knows no messages of this Safe. For a later one, after the
+    // first gave a count, it is not "no more": what is listed may not be all (lookups by hash then
+    // answer for the rest), and no member reads missing for it.
+    if (answer.body === null) {
+      if (page === 0) return { messages, complete: true, count: 0, arrivedAt };
+      break;
+    }
     const parsed = listSchema.safeParse(answer.body);
     if (!parsed.success) {
       throw new SafeApiError(`Unexpected Safe Transaction Service response for ${safe}`);

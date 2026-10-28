@@ -144,6 +144,44 @@ describe("Safe request cooldown", () => {
   });
 });
 
+describe("listing pages", () => {
+  const message = (n: number) => ({
+    created: "2026-08-15T00:06:58.176303Z",
+    modified: "2026-08-15T00:06:58.176303Z",
+    safe: checksum(SAFE(1)),
+    messageHash: hash(n),
+    message: "hello",
+    confirmations: [],
+  });
+  const page = (count: number, from: number, length: number) =>
+    new Response(
+      JSON.stringify({
+        count,
+        results: Array.from({ length }, (_, i) => message(from + i)),
+      }),
+      { status: 200 }
+    );
+
+  it("a 404 for the first page: Safe knows no messages of this Safe, a complete answer", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
+    await expect(api.fetchListing(SAFE(1))).resolves.toMatchObject({
+      messages: [],
+      complete: true,
+      count: 0,
+    });
+  });
+
+  it("a 404 for a later page after the first gave a count: incomplete, never complete", async () => {
+    fetchMock
+      .mockResolvedValueOnce(page(150, 1, 100))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    const listing = api.fetchListing(SAFE(1));
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(listing).resolves.toMatchObject({ complete: false, count: 150 });
+    expect((await listing).messages).toHaveLength(100);
+  });
+});
+
 describe("reads nobody asked for yet (warm-up, background refresh)", () => {
   it("are allowed with a key, or against a self-hosted service, never keyless on the public one", () => {
     const pub = "https://api.safe.global/tx-service/eth";
