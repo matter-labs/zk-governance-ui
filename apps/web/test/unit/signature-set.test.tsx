@@ -211,6 +211,34 @@ describe("SignatureSetCard", () => {
     expect(screen.queryByTestId("sign-button")).not.toBeInTheDocument();
   });
 
+  it("Your signature: a visitor's count says when the check is incomplete, and never asks for signatures once every threshold is met", () => {
+    const s = set as unknown as Record<string, unknown>;
+    const unanswered = {
+      ...s,
+      members: [
+        member(MEMBER_A, "valid"),
+        member(MEMBER_B, "unavailable"),
+        member(MEMBER_C, "missing"),
+      ],
+    } as never;
+    const { rerender } = render(panel(unanswered));
+    expect(screen.getByTestId("your-signature-note")).toHaveTextContent(
+      "Open for signatures: Council approval 1 of 2 (check incomplete). Members connect their Safe to sign."
+    );
+    const met = {
+      ...s,
+      valid: [
+        { signer: MEMBER_A, signature: "0xaa" },
+        { signer: MEMBER_B, signature: "0xbb" },
+      ],
+      thresholdCheck: { status: "met", valid: 2, threshold: 2 },
+    } as never;
+    rerender(panel(met));
+    expect(screen.getByTestId("your-signature-note")).toHaveTextContent(
+      "Every threshold is met: Council approval 2 of 2. Nothing is left to sign."
+    );
+  });
+
   it("Your signature: a member Safe is asked to sign exactly the typed data shown, and nothing else", () => {
     wallet.address = MEMBER_C;
     walletSign.signTypedData.mockClear();
@@ -280,7 +308,8 @@ describe("SignatureSetCard", () => {
   });
 
   it("Your signature: sent from the review, the page stays and shows the transaction in the row", () => {
-    wallet.address = MEMBER_A;
+    // Any wallet sends it (a member Safe would get a Safe transaction instead).
+    wallet.address = "0x4000000000000000000000000000000000000004";
     const hash = `0x${"7".repeat(64)}`;
     walletSend.sendTransaction.mockImplementationOnce(
       (_tx: unknown, opts: { onSuccess: (hash: string) => void }) => opts.onSuccess(hash)
@@ -306,6 +335,28 @@ describe("SignatureSetCard", () => {
     expect(within(screen.getByTestId("send-row-council")).getByTestId("tx-sent")).toHaveTextContent(
       `Sent in ${hash} · this page shows it done once it is in a block. Its receipt`
     );
+  });
+
+  it("Your signature: sent from a member Safe, what comes back is its safeTxHash, never shown as an L1 transaction", () => {
+    wallet.address = MEMBER_A;
+    const safeTxHash = `0x${"8".repeat(64)}`;
+    walletSend.sendTransaction.mockImplementationOnce(
+      (_tx: unknown, opts: { onSuccess: (hash: string) => void }) => opts.onSuccess(safeTxHash)
+    );
+    render(
+      panel(set, { status: "open" }, {
+        to: MEMBER_A,
+        data: "0x1234",
+        value: "0",
+        functionName: "approve",
+        simulation: { status: "ok" },
+      } as never)
+    );
+    fireEvent.click(screen.getByTestId("review-send"));
+    expect(screen.getByTestId("send-transaction")).toHaveTextContent("Create Safe transaction");
+    fireEvent.click(screen.getByTestId("send-transaction"));
+    expect(screen.getByTestId("safe-tx-created")).toHaveTextContent(`safeTxHash ${safeTxHash}`);
+    expect(screen.queryByTestId("tx-sent")).not.toBeInTheDocument();
   });
 
   it("folds closed groups away beside a group still in play, and shows them on request", () => {

@@ -3,7 +3,7 @@ import { type FreezeDetail, loadFreezeRequest } from "@/.server/flows/freeze";
 import { parseFreezeParams } from "@/.server/params";
 import { suppliedSignatures } from "@/.server/request";
 import { pageLoad } from "@/.server/sync/presence";
-import { FREEZE_LABELS } from "@/common/freeze";
+import { FREEZE_LABELS, longValidityWarning } from "@/common/freeze";
 import { FREEZE_STATUS_LABELS } from "@/common/upgrade-states";
 import { useStatus } from "@/components/app-shell";
 import { TxLink } from "@/components/hex";
@@ -67,6 +67,16 @@ function Detail({ detail: d }: { detail: SerializeFrom<FreezeDetail> }) {
     Unfreeze: sc.nonces.unfreeze,
     SetSoftFreezeThreshold: sc.nonces.setSoftFreezeThreshold,
   }[p.action];
+  // A deadline far out: said on the page and first in each review (the link sets it).
+  const longValidity = longValidityWarning(p.validUntil, governance.latestBlock.timestamp);
+  const caution = longValidity ? (
+    <p
+      className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 text-sm"
+      data-testid="long-validity"
+    >
+      {longValidity}
+    </p>
+  ) : undefined;
   return (
     <div className="space-y-5">
       <PageHeader
@@ -75,11 +85,13 @@ function Detail({ detail: d }: { detail: SerializeFrom<FreezeDetail> }) {
         title={`${FREEZE_LABELS[p.action]}${p.action === "SetSoftFreezeThreshold" ? ` to ${p.threshold}` : ""}`}
         badges={<SetStateBadge state={d.state} />}
       />
+      {d.state.status === "open" && caution}
       <UntilFresh stale={d.set.stale === true} fresh={fresh}>
         {(current) => {
           const v = current ?? d;
           return (
             <YourSignature
+              caution={caution}
               hint="Check the nonce and the deadline below, then compare the hashes in the review with your hardware wallet."
               actions={[
                 {

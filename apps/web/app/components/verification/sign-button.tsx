@@ -5,7 +5,13 @@ import {
   governanceHashes,
   toSignable,
 } from "@/common/typed-data";
-import { GROUP_LABEL, useConnectWallet, useConnectedGroups } from "@/components/connect-button";
+import {
+  GROUP_LABEL,
+  useConnectWallet,
+  useConnectedGroups,
+  useWrongChain,
+} from "@/components/connect-button";
+import { useChain } from "@/components/governance-context";
 import { AddressLink } from "@/components/hex";
 import { useHoldUpdates, usePresence } from "@/components/presence";
 import { Button } from "@/components/ui/button";
@@ -35,7 +41,7 @@ import { useSignTypedData } from "wagmi";
 
 /**
  * Why the connected account cannot sign now, or null: the set not current, the page's own item not
- * current, the roles not read yet, not a member, already verified.
+ * current, the wallet on another network, the roles not read yet, not a member, already verified.
  */
 export function useSignReason({
   signerGroup,
@@ -54,12 +60,14 @@ export function useSignReason({
   // The page's own item (an upgrade's state) not read at the head served: signing waits too.
   const page = usePageNotCurrent();
   const blocked = disabledReason ?? page?.reason ?? null;
-  let reason = blocked;
+  // A Safe on another chain would file the message there, for a Safe that is not this page's member.
+  const wrongChain = useWrongChain();
+  let reason = blocked ?? wrongChain;
   if (!reason && address && !known) reason = "Reading the governance roles…";
   if (!reason && address && !isMember)
     reason = `The connected account is not a ${GROUP_LABEL[signerGroup]} member Safe.`;
   if (!reason && member?.status === "valid") reason = "Your Safe's signature is already verified.";
-  return { address, member, blocked, reason };
+  return { address, member, blocked, reason, wrongChain };
 }
 
 export function SignButton({
@@ -86,7 +94,7 @@ export function SignButton({
   /** Said first in the review, before what is signed (e.g. a payload not checked against the id). */
   caution?: ReactNode;
 }) {
-  const { address, member, blocked, reason } = useSignReason({
+  const { address, member, blocked, reason, wrongChain } = useSignReason({
     signerGroup,
     members,
     disabledReason,
@@ -102,6 +110,8 @@ export function SignButton({
   const { signTypedData, isPending } = useSignTypedData();
   const presence = usePresence();
   const waiting = useHoldUpdates(open || isPending);
+  const chain = useChain();
+  const domainChain = typedData.domain.chainId;
 
   if (!address) {
     return (
@@ -184,13 +194,26 @@ export function SignButton({
             <dd className="min-w-0">
               <AddressLink address={typedData.domain.verifyingContract} />
             </dd>
+            {/* The domain's chain, as Safe{Wallet} shows it next to the contract. */}
+            <dt className="text-slate-600">Chain</dt>
+            <dd className="mono" data-testid="review-chain">
+              chain {domainChain}
+              {chain && chain.chainId === domainChain ? ` (${chain.label})` : ""}
+            </dd>
             {Object.entries(typedData.message).map(([key, value]) => (
               <Row key={key} label={key} value={value} />
             ))}
           </dl>
           {member?.hashes ? (
-            <div className="rounded-xl bg-slate-50 p-4">
+            <div className="space-y-2 rounded-xl bg-slate-50 p-4">
               <SafeHashes digest={governanceHashes(typedData).digest} hashes={member.hashes} />
+              {/* As on the member's card: the hashes above would not be this Safe's. */}
+              {member.safe.domainSeparatorMatches === false && (
+                <p className="text-red-900 text-xs" data-testid="domain-separator-differs">
+                  Warning: the Safe's on-chain domainSeparator() differs from the domain hash above.
+                  Do not sign until this is explained.
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-amber-900 text-sm">
@@ -203,11 +226,22 @@ export function SignButton({
               New data · applies when you close this
             </p>
           )}
+          {/* The wallet moved to another network while this was open. */}
+          {wrongChain && (
+            <p className="text-amber-900 text-xs" role="status" data-testid="sign-wrong-chain">
+              {wrongChain}
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={sign} loading={isPending} data-testid="confirm-sign">
+            <Button
+              onClick={sign}
+              loading={isPending}
+              disabled={wrongChain !== null && !isPending}
+              data-testid="confirm-sign"
+            >
               Send signature request to Safe
             </Button>
           </div>

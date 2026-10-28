@@ -37,20 +37,27 @@ Object.assign(walletTheme.colors, {
 // The browser never talks to an RPC of its own: chain reads happen on the server through the
 // user's RPC, and signing/sending go through the connected wallet. Without this, wagmi would send
 // lookups for the connected account (e.g. ENS) to a public third-party RPC.
-const noBrowserRpc = custom({
+export const noBrowserRpc = custom({
   request: async ({ method }) => {
     throw new Error(`${method}: this app reads the chain on its server, not from the browser`);
   },
 });
 
-function chainFor(chainId: number, label: string): Chain {
-  if (chainId === mainnet.id) return mainnet;
-  if (chainId === sepolia.id) return sepolia;
+// The chain's RPC is where WalletConnect's provider sends any method the wallet did not approve
+// (its rpcMap: the transport's URL, else the chain's first). viem retries a refused
+// eth_sendTransaction as wallet_sendTransaction, so with viem's chain objects the whole
+// transaction, an emergency payload before it executes included, would go to eth.merkle.io (or
+// drpc, or WalletConnect's own RPC with none). An address that never resolves: nothing goes out.
+const NO_RPC = { default: { http: ["https://wallet-rpc.invalid"] } } as const;
+
+export function chainFor(chainId: number, label: string): Chain {
+  if (chainId === mainnet.id) return { ...mainnet, rpcUrls: NO_RPC };
+  if (chainId === sepolia.id) return { ...sepolia, rpcUrls: NO_RPC };
   return defineChain({
     id: chainId,
     name: label,
     nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-    rpcUrls: { default: { http: [] } },
+    rpcUrls: NO_RPC,
   });
 }
 

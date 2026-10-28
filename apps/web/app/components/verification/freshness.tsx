@@ -72,6 +72,21 @@ export function setCurrency(
 }
 
 /**
+ * A count that may be short: below the threshold while Safe's service could not answer for a
+ * member (or at all). Wherever the count is said, so is this.
+ */
+export function checkIncomplete(set: {
+  thresholdCheck: { status: string };
+  members: { status: string }[];
+  safeApiError?: string | null;
+}): boolean {
+  return (
+    set.thresholdCheck.status === "below" &&
+    (set.members.some((m) => m.status === "unavailable") || !!set.safeApiError)
+  );
+}
+
+/**
  * How current a set is on screen: `staleAt`, the block its verdicts are shown as of (a first
  * answer from an older block, or behind the head served), and `notCurrent`, why nothing is signed
  * or sent from it now. The signer groups and Your signature read it the same way.

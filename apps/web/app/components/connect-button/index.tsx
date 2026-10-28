@@ -1,10 +1,11 @@
-import { useStatusIfRead } from "@/components/governance-context";
+import { useChain, useStatusIfRead } from "@/components/governance-context";
 import Avatar from "@/components/connect-button/avatar";
 import { Button } from "@/components/ui/button";
 import type { SignerGroup } from "@/common/typed-data";
 import { shortHex } from "@/utils/format";
 import { ConnectButton as RainbowConnectButton } from "@rainbow-me/rainbowkit";
 import { ChevronDown } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "react-hot-toast";
 import { type Address, isAddressEqual } from "viem";
 import { useAccount, useConfig, useConnect, useSwitchChain } from "wagmi";
@@ -35,6 +36,62 @@ export function useConnectedGroups(): {
   if (isAddressEqual(governance.emergencyUpgradeBoard.zkFoundation as Address, address))
     groups.push("zkFoundation");
   return { address, groups, known: true };
+}
+
+/**
+ * Why the connected wallet can sign or send nothing for this page now, or null: it is on another
+ * network, where a transaction (or a Safe's message) would be for that chain, not this page's.
+ */
+export function useWrongChain(): string | null {
+  const { chainId } = useAccount();
+  const chain = useChain();
+  if (chainId === undefined || !chain || chainId === chain.chainId) return null;
+  return `Your wallet is on another network (chain ${chainId}). Switch it to ${chain.label} first, with the button at the top.`;
+}
+
+/** True for a Safe{Wallet} page: the WalletConnect peer's URL is one of SAFE_WALLET_ORIGINS. */
+export function isSafeWalletPeer(url: unknown, origins: readonly string[]): boolean {
+  if (typeof url !== "string") return false;
+  try {
+    const origin = new URL(url).origin;
+    return origins.some((o) => {
+      try {
+        return new URL(o).origin === origin;
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The connected account is a Safe: what it is sent becomes one of the Safe's own transactions,
+ * which its owners confirm and execute in Safe{Wallet}, and what comes back is its safeTxHash. A
+ * member Safe is one; so is any account connected from Safe{Wallet} (its WalletConnect peer).
+ */
+export function useConnectedSafe(): boolean {
+  const { connector, address } = useAccount();
+  const { groups } = useConnectedGroups();
+  const [peerIsSafe, setPeerIsSafe] = useState(false);
+  useEffect(() => {
+    setPeerIsSafe(false);
+    if (!connector || !address) return;
+    let live = true;
+    Promise.resolve(connector.getProvider?.()).then(
+      (provider) => {
+        const url = (provider as { session?: { peer?: { metadata?: { url?: unknown } } } } | null)
+          ?.session?.peer?.metadata?.url;
+        if (live) setPeerIsSafe(isSafeWalletPeer(url, window.ENV?.SAFE_WALLET_ORIGINS ?? []));
+      },
+      () => {}
+    );
+    return () => {
+      live = false;
+    };
+  }, [connector, address]);
+  return connector?.id === "safe" || groups.length > 0 || peerIsSafe;
 }
 
 /**

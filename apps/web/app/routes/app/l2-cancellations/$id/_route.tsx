@@ -6,6 +6,8 @@ import { parseVetoParams } from "@/.server/params";
 import { suppliedSignatures } from "@/.server/request";
 import { ERA_CHAIN } from "@/common/calldata";
 import { decodeCall } from "@/common/proposal";
+import { proposalTitle } from "@/common/proposal-title";
+import { vetoValueWarnings } from "@/common/veto";
 import { useStatus } from "@/components/app-shell";
 import { AddressLink, ExternalAnchor, TxLink } from "@/components/hex";
 import { Check, EmptyState, Facts, LoadingCard, PageHeader, Section } from "@/components/page";
@@ -75,40 +77,73 @@ function Detail({ detail: d }: { detail: SerializeFrom<VetoDetail> }) {
   const p = d.params;
   const l2 = d.l2Proposal;
   const eraChain = ERA_CHAIN[governance.network.chainId];
+  // Not offered for signing: what it would cancel is unknown. Executed, it would still use the
+  // Guardians' nonce, which the real veto (or a proposal) then has to be signed again for.
+  const unverifiable =
+    d.state.status !== "open"
+      ? null
+      : !d.governorKnown
+        ? "The L2 governor is not one of the ZKsync governors this app knows, so what this veto cancels cannot be checked."
+        : !l2 && !d.l2Error
+          ? "The governor has no such proposal, so this veto would cancel nothing."
+          : null;
+  const warnings = vetoValueWarnings(p);
+  const caution =
+    d.state.status === "open" && (warnings.length > 0 || d.l2Error) ? (
+      <VetoCaution warnings={warnings} l2Error={d.l2Error} />
+    ) : undefined;
   return (
     <div className="space-y-8">
       <PageHeader
         back={{ to: $path("/app/l2-cancellations"), label: "Guardian veto" }}
         eyebrow="Guardian veto"
-        title={l2?.description.split("\n")[0] || "Veto of an L2 proposal"}
+        title={(l2 && proposalTitle(l2.description)) || "Veto of an L2 proposal"}
         badges={
           <>
-            <SetStateBadge state={d.state} />
+            {unverifiable ? (
+              <Badge variant="warning" data-testid="veto-unverifiable">
+                Not offered for signing
+              </Badge>
+            ) : (
+              <SetStateBadge state={d.state} />
+            )}
             {!d.governorKnown && <Badge variant="error">Not a known governor</Badge>}
           </>
         }
         id={p.l2ProposalId}
       />
-      <UntilFresh stale={d.set.stale === true} fresh={fresh}>
-        {(current) => {
-          const v = current ?? d;
-          return (
-            <YourSignature
-              hint="Check the proposal being cancelled below, then compare the hashes in the review with your hardware wallet."
-              actions={[
-                {
-                  key: "veto",
-                  title: "Guardian veto",
-                  set: v.set,
-                  state: v.state,
-                  execution: v.execution,
-                  executionToLabel: "Guardians",
-                },
-              ]}
-            />
-          );
-        }}
-      </UntilFresh>
+      {caution}
+      {unverifiable ? (
+        <p
+          className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 text-sm"
+          data-testid="veto-not-offered"
+        >
+          {unverifiable} It is not offered for signing here: executed, it would still use the
+          Guardians' veto nonce, and the real veto would have to be signed again.
+        </p>
+      ) : (
+        <UntilFresh stale={d.set.stale === true} fresh={fresh}>
+          {(current) => {
+            const v = current ?? d;
+            return (
+              <YourSignature
+                caution={caution}
+                hint="Check the proposal being cancelled below, then compare the hashes in the review with your hardware wallet."
+                actions={[
+                  {
+                    key: "veto",
+                    title: "Guardian veto",
+                    set: v.set,
+                    state: v.state,
+                    execution: v.execution,
+                    executionToLabel: "Guardians",
+                  },
+                ]}
+              />
+            );
+          }}
+        </UntilFresh>
+      )}
       <Facts
         items={[
           {
@@ -219,6 +254,33 @@ function Detail({ detail: d }: { detail: SerializeFrom<VetoDetail> }) {
           }}
         </UntilFresh>
       </ApprovalGroups>
+    </div>
+  );
+}
+
+/** Said on the page and first in each review before signing: odd signed values, an unread L2. */
+function VetoCaution({ warnings, l2Error }: { warnings: string[]; l2Error: string | null }) {
+  return (
+    <div
+      className="space-y-1 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 text-sm"
+      data-testid="veto-caution"
+    >
+      {l2Error && (
+        <p>
+          The L2 proposal could not be read, so what this veto cancels is not checked here. Check it
+          before signing.
+        </p>
+      )}
+      {warnings.length > 0 && (
+        <>
+          <p className="font-semibold">Unusual values in this veto (they are all signed):</p>
+          <ul className="list-disc pl-5">
+            {warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }

@@ -35,7 +35,7 @@ import { useEffect, useRef, useState } from "react";
 import { type Address, type Hex, isAddressEqual } from "viem";
 import { usePageNotCurrent } from "./content-currency";
 import { ExecutionPanel, SentTransaction } from "./execution-panel";
-import { setStanding } from "./freshness";
+import { checkIncomplete, setStanding } from "./freshness";
 import { SignButton, useSignReason } from "./sign-button";
 import { SafeHashes } from "./safe-hashes";
 import { useAccount } from "wagmi";
@@ -194,13 +194,29 @@ function Who({
 }) {
   const { connect: openConnectModal } = useConnectWallet();
   const groups = [...new Set(open.map((a) => GROUP_NAME[a.set.signerGroup] ?? a.title))];
+  // Each count as the group's card says it: one Safe's service could not answer for is not final.
+  const counts = open
+    .map(
+      (a) =>
+        `${a.title} ${a.set.valid.length} of ${a.set.threshold}${checkIncomplete(a.set) ? " (check incomplete)" : ""}`
+    )
+    .join(" · ");
+  const allMet = open.every((a) => a.set.thresholdCheck.status === "met");
   if (!you)
     return (
       <>
         <span className="min-w-0" data-testid="your-signature-note">
-          <span className="font-medium text-navy-800">Open for signatures: </span>
-          {open.map((a) => `${a.title} ${a.set.valid.length} of ${a.set.threshold}`).join(" · ")}.
-          Members connect their Safe to sign.
+          {allMet ? (
+            <>
+              <span className="font-medium text-navy-800">Every threshold is met: </span>
+              {counts}. Nothing is left to sign.
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-navy-800">Open for signatures: </span>
+              {counts}. Members connect their Safe to sign.
+            </>
+          )}
         </span>
         {openConnectModal && (
           <Button size="sm" variant="ghost" onClick={openConnectModal}>

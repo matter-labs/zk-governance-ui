@@ -1,5 +1,7 @@
 import type { Simulation } from "@/.server/signatures";
 import { useHoldUpdates, useLive, usePresence, useWatchItem } from "@/components/presence";
+import { useConnectedSafe, useWrongChain } from "@/components/connect-button";
+import { useChain } from "@/components/governance-context";
 import { AddressLink, CopyButton, TxLink } from "@/components/hex";
 import { Button } from "@/components/ui/button";
 import { usePageNotCurrent } from "@/components/verification/content-currency";
@@ -146,12 +148,16 @@ export function ExecutionPanel({
   /** Sent: the hash goes here (the caller shows it); without it, the panel shows it itself. */
   onSent?: (hash: Hex) => void;
 }) {
-  const { isConnected, connector } = useAccount();
+  const { isConnected } = useAccount();
   const { sendTransaction, isPending } = useSendTransaction();
   const [sent, setSent] = useState<Hex | null>(null);
-  // Inside Safe{Wallet} the transaction becomes one of the Safe's own, which its owners confirm
-  // and execute there; what comes back is its safeTxHash, not a transaction hash.
-  const viaSafe = connector?.id === "safe";
+  // From a Safe the transaction becomes one of the Safe's own, which its owners confirm and
+  // execute in Safe{Wallet}; what comes back is its safeTxHash, not a transaction hash.
+  const viaSafe = useConnectedSafe();
+  // Sent with this page's chain: a wallet on another one refuses it (viem's chain check) instead
+  // of sending it there. The button waits until the wallet is moved.
+  const chain = useChain();
+  const wrongChain = useWrongChain();
   const [safeTxHash, setSafeTxHash] = useState<Hex | null>(null);
   // While the wallet request is pending, or the Safe transaction hash is shown (until dismissed),
   // the page's data is not reloaded.
@@ -167,6 +173,15 @@ export function ExecutionPanel({
       : page;
 
   const send = () => {
+    // The panel's own simulation says it reverts: sent only once that is confirmed.
+    const sim = execution.simulation;
+    if (
+      sim?.status === "reverted" &&
+      !window.confirm(
+        `The simulation says this transaction would revert (${sim.error}). Send it anyway? It would most likely fail on-chain and still cost gas.`
+      )
+    )
+      return;
     toast.loading(
       viaSafe
         ? "Review the transaction in Safe{Wallet}…"
@@ -174,7 +189,12 @@ export function ExecutionPanel({
       { id: "send-tx" }
     );
     sendTransaction(
-      { to: execution.to as Hex, data: execution.data as Hex, value: BigInt(execution.value) },
+      {
+        to: execution.to as Hex,
+        data: execution.data as Hex,
+        value: BigInt(execution.value),
+        chainId: chain?.chainId,
+      },
       {
         onSuccess: (hash) => {
           if (viaSafe) {
@@ -207,18 +227,28 @@ export function ExecutionPanel({
             size="sm"
             onClick={send}
             loading={isPending}
-            disabled={!isConnected || (blocked !== null && !isPending)}
-            title={blocked?.reason ?? (isConnected ? undefined : "Connect a wallet to send")}
+            disabled={!isConnected || wrongChain !== null || (blocked !== null && !isPending)}
+            title={
+              blocked?.reason ??
+              wrongChain ??
+              (isConnected ? undefined : "Connect a wallet to send")
+            }
             data-testid="send-transaction"
           >
             <Send /> {viaSafe ? "Create Safe transaction" : "Send transaction"}
           </Button>
         </div>
       </div>
-      {blocked && (
+      {blocked ? (
         <p className="text-slate-700 text-xs" role="status" data-testid="send-blocked">
           {blocked.reason} {blocked.waits}
         </p>
+      ) : (
+        wrongChain && (
+          <p className="text-amber-900 text-xs" role="status" data-testid="send-wrong-chain">
+            {wrongChain}
+          </p>
+        )
       )}
       <p className="text-slate-950 text-sm">
         {note ??

@@ -3,7 +3,7 @@ import { watchItems, watchKeys } from "@/.server/sync/presence";
 import { freshAfter } from "@/.server/flows/common";
 import { type FreezeList, type FreezeSummary, loadFreezeList } from "@/.server/flows/freeze";
 import type { FreezeAction } from "@/common/execution";
-import { FREEZE_ACTIONS, FREEZE_LABELS, freezePath } from "@/common/freeze";
+import { FREEZE_ACTIONS, FREEZE_LABELS, freezePath, longValidityWarning } from "@/common/freeze";
 import { FREEZE_STATUS_LABELS } from "@/common/upgrade-states";
 import { WithStatus, useStatus } from "@/components/governance-context";
 import { EmptyState, Facts, LoadingCard, PageHeader, QuietEmpty } from "@/components/page";
@@ -253,6 +253,9 @@ function NewRequestDialog() {
   }[action];
   const valid =
     Number.isFinite(validUntil) && validUntil > Number(governance.latestBlock.timestamp);
+  const longValidity = valid
+    ? longValidityWarning(validUntil, governance.latestBlock.timestamp)
+    : null;
 
   return (
     <Dialog>
@@ -321,6 +324,11 @@ function NewRequestDialog() {
                 "Must be in the future."
               )}
             </p>
+            {longValidity && (
+              <p className="text-amber-900 text-xs" data-testid="long-validity">
+                {longValidity}
+              </p>
+            )}
           </div>
           <Button
             className="w-full"

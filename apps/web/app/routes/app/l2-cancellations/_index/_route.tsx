@@ -9,6 +9,7 @@ import {
   type VetoableProposals,
   loadL2VetoList,
 } from "@/.server/flows/l2-veto";
+import { proposalTitle } from "@/common/proposal-title";
 import { vetoPath } from "@/common/veto";
 import { WithStatus } from "@/components/governance-context";
 import { EmptyState, LoadingCard, PageHeader, QuietEmpty } from "@/components/page";
@@ -269,7 +270,7 @@ function Vetoable({ proposals }: { proposals: SerializeFrom<L2ProposalView>[] })
         >
           <span className="min-w-0 flex-1">
             <span className="block truncate font-semibold text-navy-800">
-              {p.description.split("\n")[0] || "(no description)"}
+              {proposalTitle(p.description) ?? "(no description)"}
             </span>
             <span className="text-slate-550 text-xs">
               {p.governorName} · {p.state ?? "state unknown"} · voting ends {formatTime(p.voteEnd)}

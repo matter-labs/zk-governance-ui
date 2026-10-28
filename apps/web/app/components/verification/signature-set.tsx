@@ -29,6 +29,7 @@ import { SafeHashes } from "./safe-hashes";
 import {
   FreshnessNote,
   type Refresh,
+  checkIncomplete,
   newerCheck,
   safeUnavailableReason,
   setStanding,
@@ -212,8 +213,7 @@ function GroupRow({
   const { verifiedAt, behind, staleAt } = setStanding(set, live);
   const followed = set.watch?.rev !== null && set.watch?.rev !== undefined;
   const unavailable = set.members.filter((m) => m.status === "unavailable").length;
-  const incomplete =
-    set.thresholdCheck.status === "below" && (unavailable > 0 || !!set.safeApiError);
+  const incomplete = checkIncomplete(set);
   const safeCheck =
     state.status === "open" && set.safeCheck !== null
       ? newerCheck(set.watch ? live.checked[set.watch.key] : null, set.safeCheck)
