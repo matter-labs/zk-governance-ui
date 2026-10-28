@@ -111,6 +111,11 @@ export function replace<T>(key: string, value: T, ttlMs: number) {
   store.set(key, { value: Promise.resolve(value), expiresAt: Date.now() + ttlMs });
 }
 
+/** Drops `key`'s entry, in flight or not: the next caller reads again (its callers keep its answer). */
+export function forget(key: string) {
+  store.delete(key);
+}
+
 export function peek<T>(key: string): Promise<T> | null {
   const hit = store.get(key) as Entry<T> | undefined;
   return hit && hit.expiresAt > Date.now() ? hit.value : null;

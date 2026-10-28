@@ -16,7 +16,7 @@ import { cached } from "../cache";
 import { type BlockRef, rpcGeneration } from "../rpc";
 import { AggregateDropped, AggregateFailed, aggregateAt, wordOf } from "./aggregate";
 import { noteCodePresent } from "./call";
-import { codePins, hasPinnedCode } from "./pins";
+import { codePins, councilPins, hasPinnedCode } from "./pins";
 
 // The verdict fast path: a set's checks at a head as sub-calls of the head's aggregate3 instead of
 // one eth_call each. Only POSITIVES are taken from it, and only when:
@@ -138,7 +138,7 @@ async function pinnedCheck(check: FastCheck, members: readonly Address[]): Promi
   const checks = await Promise.all([
     check.kind === "safe-1271"
       ? hasPinnedCode(check.contract, [pins.safeProxy])
-      : hasPinnedCode(check.contract, [pins.securityCouncil, pins.guardians]),
+      : hasPinnedCode(check.contract, councilPins(pins, "securityCouncil", "guardians")),
     ...members.map((member) => hasPinnedCode(member, [pins.safeProxy])),
   ]);
   return checks.every(Boolean);

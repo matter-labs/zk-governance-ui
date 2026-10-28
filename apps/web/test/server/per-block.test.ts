@@ -31,7 +31,7 @@ import { presence, resetPresence, watchKeys } from "@/.server/sync/presence";
 import { snapshotStatus } from "@/.server/sync/snapshot";
 import { currentUpgradeStatus, upgradeStatusKey } from "@/.server/upgrade-status";
 import { UPGRADE_STATES } from "@/common/upgrade-states";
-import { type Hex, getAddress, numberToHex } from "viem";
+import { type Hex, getAddress, keccak256, numberToHex } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blockHash } from "../support/fake-chain";
 import { FakeRpcError } from "../support/fake-jsonrpc";
@@ -330,6 +330,57 @@ describe("governance at each head, for pages", () => {
     // The contracts the read found are checked against the pins (once), then the split applies.
     await vi.advanceTimersByTimeAsync(1_500);
     await block(w);
+    const next = await settle(pageGovernance());
+    expect(next.securityCouncil.address).toBe(NEW_SC);
+    expect(governanceReadKind(next)).toBe("split");
+  });
+
+  it("a council switch to code that is not pinned: pages name the new council from its first head, never JSON's entry read before it", async () => {
+    const NEW_SC = getAddress("0x5c00000000000000000000000000000000000002");
+    let change = Number.POSITIVE_INFINITY as unknown as bigint;
+    const w = liveWorld({
+      answer: fromBlock("securityCouncil", () => change, NEW_SC),
+      aliases: new Map([[NEW_SC, L1.securityCouncil]]),
+      code: (address) => (address === NEW_SC ? "0x6001600101" : undefined),
+    });
+    await following(w);
+    // JSON read just before the switch (an /api request): its entry names the old council for 30 s.
+    expect((await settle(governance())).securityCouncil.address).toBe(L1.securityCouncil);
+    change = w.head() + 1n;
+    await block(w);
+    const first = await settle(pageGovernance());
+    expect(first.securityCouncil.address).toBe(NEW_SC);
+    // The split is off (the new code is not the pinned code): pages read as JSON does, which names
+    // the new council too.
+    expect(await settle(governanceSplitApplies())).toBe(false);
+    expect((await settle(pageGovernance())).securityCouncil.address).toBe(NEW_SC);
+    expect((await settle(governance())).securityCouncil.address).toBe(NEW_SC);
+  });
+
+  it("a council switch to the next release's pinned code (CodePins.next, v31's): the split holds across it", async () => {
+    const NEW_SC = getAddress("0x5c00000000000000000000000000000000000003");
+    const NEXT_CODE: Hex = "0x6001600102";
+    overrideCodePinsForTests({
+      ...FAKE_PINS,
+      next: {
+        securityCouncil: keccak256(NEXT_CODE),
+        guardians: FAKE_PINS.guardians,
+        emergencyUpgradeBoard: FAKE_PINS.emergencyUpgradeBoard,
+      },
+    });
+    let change = Number.POSITIVE_INFINITY as unknown as bigint;
+    const w = liveWorld({
+      answer: fromBlock("securityCouncil", () => change, NEW_SC),
+      aliases: new Map([[NEW_SC, L1.securityCouncil]]),
+      code: (address) => (address === NEW_SC ? NEXT_CODE : undefined),
+    });
+    await following(w);
+    change = w.head() + 1n;
+    await block(w);
+    expect((await settle(pageGovernance())).securityCouncil.address).toBe(NEW_SC);
+    await vi.advanceTimersByTimeAsync(1_500);
+    await block(w);
+    expect(await settle(governanceSplitApplies())).toBe(true);
     const next = await settle(pageGovernance());
     expect(next.securityCouncil.address).toBe(NEW_SC);
     expect(governanceReadKind(next)).toBe("split");

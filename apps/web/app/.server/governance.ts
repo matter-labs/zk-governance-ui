@@ -20,10 +20,10 @@ import {
   numberToHex,
   zeroHash,
 } from "viem";
-import { cached, cachedUntil, linkStore } from "./cache";
+import { cached, cachedUntil, forget, linkStore } from "./cache";
 import { type SubResult, aggregateAllAt } from "./chain/aggregate";
 import { callFn, classify, isUnknownBlock } from "./chain/call";
-import { codePins, pinChecksAllowed, runsPinnedCode } from "./chain/pins";
+import { codePins, councilPins, pinChecksAllowed, runsPinnedCode } from "./chain/pins";
 import { readMemberList } from "./member-list";
 import {
   type BlockRef,
@@ -579,6 +579,9 @@ async function readAt(net: Network, at: BlockRef): Promise<Governance> {
   const reads =
     (guess && (await readInOne(net, blockNumber, guess))) || (await readInRounds(net, blockNumber));
   if (epoch === layoutEpoch) {
+    // The handler names other contracts than the last read did (a council switch): JSON's entry,
+    // read before, names the old ones, and pages read it while the new code's pins are checked.
+    if (layout && !sameContracts(layout, reads)) forget(GOVERNANCE_KEY);
     layout = {
       puh: reads.puh,
       sc: reads.sc,
@@ -723,9 +726,9 @@ async function pinnedContracts(reads: Reads): Promise<boolean> {
   const pins = await codePins();
   if (!pins) return false;
   const checks = await Promise.all([
-    runsPinnedCode(reads.sc, [pins.securityCouncil]),
-    runsPinnedCode(reads.g, [pins.guardians]),
-    runsPinnedCode(reads.eub, [pins.emergencyUpgradeBoard]),
+    runsPinnedCode(reads.sc, councilPins(pins, "securityCouncil")),
+    runsPinnedCode(reads.g, councilPins(pins, "guardians")),
+    runsPinnedCode(reads.eub, councilPins(pins, "emergencyUpgradeBoard")),
   ]);
   return checks.every(Boolean);
 }

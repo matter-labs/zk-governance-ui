@@ -35,6 +35,15 @@ export async function codePins(): Promise<CodePins | null> {
   return net.codePins ?? null;
 }
 
+type Council = keyof NonNullable<CodePins["next"]>;
+
+/** The code a council may run: the pinned release's, and the next one's (CodePins.next). */
+export function councilPins(pins: CodePins, ...councils: Council[]): Hex[] {
+  return councils.flatMap((council) =>
+    pins.next ? [pins[council], pins.next[council]] : [pins[council]]
+  );
+}
+
 /** keccak256 of the code at `address` ('latest'), null for none; rejects when it cannot be read. */
 function codeHashOf(address: Address): Promise<Hex | null> {
   return cached(`code-hash:${rpcGeneration()}:${address.toLowerCase()}`, FOREVER, async () => {

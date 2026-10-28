@@ -11,9 +11,10 @@ import { type Address, type Hex, toEventSelector } from "viem";
 //   is cross-checked on-chain: ZkProtocolGovernor.timelock() == ProtocolUpgradeHandler.L2_PROTOCOL_GOVERNOR.
 // - L2 governor log blocks (one eth_getLogs over the three governors from Era genesis, 2026-10-06):
 //   the first ProposalCreated/Executed/Canceled log, and the first log of any kind (deployment).
-// - Sepolia ProtocolUpgradeHandler 0x7444…: apps/web/docs (removed). It is the only Sepolia handler
-//   that still answers the handler ABI; the one listed in the docs (0xe3a6…) is a proxy whose
-//   implementation no longer has handler functions. Override with UPGRADE_HANDLER_ADDRESS.
+// - Sepolia ProtocolUpgradeHandler 0x7444…: apps/web/docs (removed). The one listed in the docs
+//   (0xe3a6…) is a proxy whose implementation no longer has handler functions. Other Sepolia
+//   handlers answer the handler ABI too (testnet's 0x803e5E7aF1FDD504F8844E28a249203Cfa7c471D,
+//   stage's 0x8f08627524aeD610192132A425D6b9C32a1727EF). Override with UPGRADE_HANDLER_ADDRESS.
 export type NetworkName = "mainnet" | "sepolia" | "local";
 
 // keccak256 of runtime code the app relies on (read on mainnet at block 26,141,196). Only while it
@@ -28,6 +29,11 @@ export type CodePins = {
   /** Safe 1.3.0 singleton (slot 0 of the proxy) and CompatibilityFallbackHandler 1.3.0. */
   safeSingleton: Address;
   safeFallbackHandler: Address;
+  /**
+   * The councils' code in a release the handler is about to switch to, deployed ahead of the
+   * switch: pinned too, so pages keep reading governance at each head across it (chain/pins.ts).
+   */
+  next?: Pick<CodePins, "securityCouncil" | "guardians" | "emergencyUpgradeBoard">;
 };
 
 export type NetworkConfig = {
@@ -95,6 +101,17 @@ export const NETWORKS: Record<1 | 11155111, NetworkConfig> = {
       safeProxy: "0xb89c1b3bdf2cf8827818646bce9a8f6e372885f8c55e5c07acbd307cb133b000",
       safeSingleton: "0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552",
       safeFallbackHandler: "0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4",
+      // v31 (ZIP-18 upgrade 0xd0b892663947d43cf35585cd69ac4232273ef3815636bafbe619a49f04cd6520
+      // initializes the handler with them): SecurityCouncil 0x29D2e773A31C07D375c50F0110422832bd044d08
+      // (8 members), Guardians 0x8f525e55F76050d8dFdDa4870DA1b3ede54E908F (vetoes through the
+      // Bridgehub), EmergencyUpgradeBoard 0x91989F9BB8391D3471D2672Ec001921cB14C4b7C. The same
+      // Multisig, typehashes and getters (zk-governance kl/v31-puh-guardians-redeploy), read on
+      // mainnet at block 26,291,245.
+      next: {
+        securityCouncil: "0xc04dd16b6d32e1606135aeb426f33c9487350fdc1faa21cec6ff4abfec5966e3",
+        guardians: "0x28932551517fc5e98c49ca4c9d780d3f2bd4dbce4708eaced13e0fc9f6ce2928",
+        emergencyUpgradeBoard: "0xc801147d31a04644fc188a6cfceb0b5d0f89316ef058ba54f10d041f584dd188",
+      },
     },
   },
   11155111: {
