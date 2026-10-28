@@ -14,7 +14,14 @@ import {
 } from "@/common/proposal";
 import { type ActionName, buildTypedData, governanceHashes } from "@/common/typed-data";
 import { UPGRADE_STATES } from "@/common/upgrade-states";
-import { type Address, type Hex, decodeAbiParameters, decodeFunctionData, getAddress } from "viem";
+import {
+  type Address,
+  type Hex,
+  decodeAbiParameters,
+  decodeFunctionData,
+  getAddress,
+  isAddressEqual,
+} from "viem";
 import { FOREVER, cached, cachedUntil } from "../cache";
 import { CallReverted, callFn, isFinalBlock } from "../chain/call";
 import { IndexIntegrityError, type PuhEvent, puhIndex } from "../chain/puh-index";
@@ -33,7 +40,7 @@ import type { Freshness, SignatureSet } from "../signatures";
 import {
   type UsedSignature,
   blockTimeOf,
-  callTo,
+  callsIn,
   compareUsedSignatures,
   firstOrFresh,
   hasArchiveState,
@@ -503,11 +510,22 @@ export async function loadEmergencyUpgrade(
   // With its block's time, read beside it (kept for good once final).
   const decodedOf = async (event: EmergencyEvent) => {
     const [decoded, at] = await Promise.all([
-      decodeExecution(event.txHash, board.address),
+      decodeExecution(event.txHash, id, board.address),
       blockTimeOf(event.blockNumber),
     ]);
     return decoded && { ...decoded, at };
   };
+
+  // What the board an execution went through checked: today's, or an earlier one's own.
+  const rolesOf = (executedBy: Address): Promise<BoardRoles> =>
+    isAddressEqual(executedBy, board.address)
+      ? Promise.resolve({
+          domain: board.domain,
+          securityCouncil: gov.securityCouncil.address,
+          guardians: gov.guardians.address,
+          zkFoundation: board.zkFoundation,
+        })
+      : earlierBoardRoles(executedBy, gov.network.chainId);
 
   const callsFrom = (
     event: EmergencyEvent,
@@ -523,11 +541,12 @@ export async function loadEmergencyUpgrade(
 
   const historicalFrom = async (
     event: EmergencyEvent,
-    { guardians, securityCouncil, zkFoundation }: Decoded
+    { board: executedBy, guardians, securityCouncil, zkFoundation }: Decoded
   ): Promise<EmergencyHistorical> => {
     const block = event.blockNumber - 1n;
+    const roles = await rolesOf(executedBy);
     const hashes = specs.map((spec) => ({
-      hashes: governanceHashes(buildTypedData(spec.action, board.domain, { id })),
+      hashes: governanceHashes(buildTypedData(spec.action, roles.domain, { id })),
     }));
     // Keyed by the block the checks run at: the same transaction reorged into another block is
     // checked again there, never answered from the old one.
@@ -538,21 +557,21 @@ export async function loadEmergencyUpgrade(
         const final = await isFinalBlock(block);
         const checks = await Promise.all([
           check1271(
-            gov.securityCouncil.address,
+            roles.securityCouncil,
             hashes[0] as Pick<SignatureSet, "hashes">,
             securityCouncil,
             block,
             "Security Council"
           ),
           check1271(
-            gov.guardians.address,
+            roles.guardians,
             hashes[1] as Pick<SignatureSet, "hashes">,
             guardians,
             block,
             "Guardians"
           ),
           checkSafe(
-            board.zkFoundation,
+            roles.zkFoundation,
             hashes[2] as Pick<SignatureSet, "hashes">,
             zkFoundation,
             block
@@ -563,7 +582,7 @@ export async function loadEmergencyUpgrade(
       });
     // No answer about the archive state: every check reads as not done, with the RPC error
     // (never as "no archive state"), and nothing is kept.
-    const archive = await hasArchiveState(board.address, block).catch(
+    const archive = await hasArchiveState(executedBy, block).catch(
       (error: unknown) => `RPC error: ${error instanceof Error ? error.message : String(error)}`
     );
     const historical: EmergencyExecution["historical"] =
@@ -673,17 +692,20 @@ export async function loadEmergencyUpgrade(
     sets: SignatureSet[],
     execution: EmergencyExecution | null
   ): Promise<EmergencyDetail> => {
-    const decoded = execution ? await decodeExecution(execution.txHash, board.address) : null;
-    const used = decoded
-      ? [
-          decoded.securityCouncil,
-          decoded.guardians,
-          {
-            signers: [board.zkFoundation],
-            signatures: [decoded.zkFoundation],
-          },
-        ]
-      : [];
+    const decoded = execution ? await decodeExecution(execution.txHash, id, board.address) : null;
+    // An earlier board's contracts not read: the signatures it was sent are not compared this time.
+    const zkFoundation = decoded && (await rolesOf(decoded.board).catch(() => null))?.zkFoundation;
+    const used =
+      decoded && zkFoundation
+        ? [
+            decoded.securityCouncil,
+            decoded.guardians,
+            {
+              signers: [zkFoundation],
+              signatures: [decoded.zkFoundation],
+            },
+          ]
+        : [];
     const roles: EmergencyRole[] = specs.map((spec, i) => ({
       key: spec.key,
       title: spec.title,
@@ -783,24 +805,23 @@ type Blob = { signers: readonly Address[]; signatures: readonly Hex[] };
 
 type Decoded = NonNullable<Awaited<ReturnType<typeof decodeExecution>>>;
 
-/** calls, salt and the three signature blobs from an executeEmergencyUpgrade transaction. */
-async function decodeExecution(txHash: Hex, board: Address) {
-  return cached(`emergency-exec:${txHash}`, Number.POSITIVE_INFINITY, async () => {
-    const call = await callTo(txHash, board);
-    if (!call) return null;
+/** An executeEmergencyUpgrade call to `call.to`, its proposal executed by that board; else null. */
+function decodeBoardCall(call: { to: Address; data: Hex }) {
+  const unpack = (blob: Hex): Blob => {
+    const [signers, signatures] = decodeAbiParameters(
+      [{ type: "address[]" }, { type: "bytes[]" }],
+      blob
+    );
+    return { signers: signers.map((s) => getAddress(s)), signatures };
+  };
+  try {
     const { functionName, args } = decodeFunctionData({
       abi: emergencyUpgradeBoardAbi,
       data: call.data,
     });
     if (functionName !== "executeEmergencyUpgrade") return null;
     const [calls, salt, guardiansBlob, councilBlob, zkFoundation] = args;
-    const unpack = (blob: Hex): Blob => {
-      const [signers, signatures] = decodeAbiParameters(
-        [{ type: "address[]" }, { type: "bytes[]" }],
-        blob
-      );
-      return { signers: signers.map((s) => getAddress(s)), signatures };
-    };
+    const board = getAddress(call.to);
     const proposal: UpgradeProposal = {
       calls: calls.map((c) => ({
         target: getAddress(c.target),
@@ -811,10 +832,60 @@ async function decodeExecution(txHash: Hex, board: Address) {
       salt,
     };
     return {
+      board,
       proposal,
       guardians: unpack(guardiansBlob),
       securityCouncil: unpack(councilBlob),
       zkFoundation,
+    };
+  } catch {
+    // Another function, or a board this build does not know (the two-party board's).
+    return null;
+  }
+}
+
+/**
+ * calls, salt and the three signature blobs from the transaction that executed emergency upgrade
+ * `id`, and the board it went through. Today's board's call is taken as it is (its id is compared
+ * where it is shown); a call to another board only when its calls hash to `id` with that board as
+ * executor, which only the board the handler named then can have sent (the handler took the id
+ * from it): the board already changed once (block 25,134,966).
+ */
+async function decodeExecution(txHash: Hex, id: Hex, board: Address) {
+  return cached(`emergency-exec:${txHash}:${id}:${board}`, Number.POSITIVE_INFINITY, async () => {
+    const decoded = (await callsIn(txHash)).map(decodeBoardCall);
+    return (
+      decoded.find((d) => d && isAddressEqual(d.board, board)) ??
+      decoded.find((d) => d && upgradeProposalId(d.proposal).toLowerCase() === id.toLowerCase()) ??
+      null
+    );
+  });
+}
+
+/** The contracts a board checks, and its EIP-712 domain: set in its constructor. */
+type BoardRoles = {
+  domain: Governance["emergencyUpgradeBoard"]["domain"];
+  securityCouncil: Address;
+  guardians: Address;
+  zkFoundation: Address;
+};
+
+/** An earlier board's (see decodeExecution): kept for good, all of it constructor-set. */
+function earlierBoardRoles(board: Address, chainId: number): Promise<BoardRoles> {
+  return cached(`board-roles:${chainId}:${board}`, FOREVER, async () => {
+    const get = <T>(functionName: string) =>
+      callFn<T>({ address: board, abi: emergencyUpgradeBoardAbi, functionName });
+    const [domain, securityCouncil, guardians, zkFoundation] = await Promise.all([
+      get<readonly [Hex, string, string, bigint, Address]>("eip712Domain"),
+      get<Address>("SECURITY_COUNCIL"),
+      get<Address>("GUARDIANS"),
+      get<Address>("ZK_FOUNDATION_SAFE"),
+    ]);
+    return {
+      domain: { name: domain[1], version: domain[2], chainId, verifyingContract: board },
+      securityCouncil: getAddress(securityCouncil),
+      guardians: getAddress(guardians),
+      zkFoundation: getAddress(zkFoundation),
     };
   });
 }

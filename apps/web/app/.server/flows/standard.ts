@@ -1,4 +1,4 @@
-import { guardiansAbi, upgradeHandlerAbi } from "@/common/abis";
+import { guardiansAbi, securityCouncilAbi, upgradeHandlerAbi } from "@/common/abis";
 import {
   approvalExecution,
   executeUpgradeExecution,
@@ -11,15 +11,27 @@ import {
   fromAbi,
   upgradeProposalId,
 } from "@/common/proposal";
-import { type ActionName, buildTypedData, governanceHashes } from "@/common/typed-data";
+import {
+  type ActionName,
+  type Eip712Domain,
+  buildTypedData,
+  governanceHashes,
+} from "@/common/typed-data";
 import {
   UPGRADE_STATES,
   UPGRADE_STATE_LABELS,
   type UpgradeState,
   isUpgradeActive,
 } from "@/common/upgrade-states";
-import { type Address, type Hex, decodeEventLog, isAddressEqual, zeroAddress } from "viem";
-import { FOREVER, cachedUntil, peek, seed } from "../cache";
+import {
+  type Address,
+  type Hex,
+  decodeEventLog,
+  getAddress,
+  isAddressEqual,
+  zeroAddress,
+} from "viem";
+import { FOREVER, cached, cachedUntil, peek, seed } from "../cache";
 import { CallReverted, callFn, isFinalBlock } from "../chain/call";
 import { IndexIntegrityError, type PuhEvent, puhIndex } from "../chain/puh-index";
 import type { Governance } from "../governance";
@@ -38,7 +50,7 @@ import {
   type SetState,
   type UsedSignature,
   blockTimeOf,
-  callTo,
+  callsIn,
   compareUsedSignatures,
   decodeApprovalCall,
   eventsWithId,
@@ -700,18 +712,24 @@ async function getRecordedApprovals(d: StandardUpgradeCore): Promise<RecordedApp
                 ? await blockTimeOf(event.blockNumber)
                 : null;
           state = { ...spec.state, txHash, at };
-          const call = txHash ? await callTo(txHash, contract.address) : null;
-          const decoded = call ? decodeApprovalCall(call.data) : null;
-          if (decoded && event) {
-            used = decoded;
-            const block = event.blockNumber - 1n;
+          const block = event ? event.blockNumber - 1n : null;
+          const sent =
+            txHash && block !== null
+              ? await approvalSent(
+                  spec,
+                  { address: contract.address, domain: contract.domain, threshold: spec.threshold },
+                  { txHash, id, block, handler: gov.upgradeHandler }
+                )
+              : null;
+          if (sent && block !== null) {
+            used = sent.decoded;
             historical = await recheckAt(
-              contract.address,
+              sent.council.address,
               {
-                hashes: governanceHashes(buildTypedData(spec.action, contract.domain, { id })),
-                threshold: spec.threshold,
+                hashes: governanceHashes(buildTypedData(spec.action, sent.council.domain, { id })),
+                threshold: sent.council.threshold,
               },
-              decoded,
+              sent.decoded,
               block
             );
           }
@@ -719,6 +737,87 @@ async function getRecordedApprovals(d: StandardUpgradeCore): Promise<RecordedApp
         return { key: spec.key, title: spec.title, state, used, historical };
       })
   );
+}
+
+/** A council an approval went through: its address, EIP-712 domain and the threshold it checked. */
+type ApprovingCouncil = { address: Address; domain: Eip712Domain; threshold: number };
+
+const APPROVAL_CALL: Record<ApprovalSet["key"], string> = {
+  securityCouncil: "approveUpgradeSecurityCouncil",
+  guardians: "approveUpgradeGuardians",
+  legalVeto: "extendLegalVeto",
+};
+
+const THRESHOLD_GETTER: Record<ApprovalSet["key"], string> = {
+  securityCouncil: "APPROVE_UPGRADE_SECURITY_COUNCIL_THRESHOLD",
+  guardians: "APPROVE_UPGRADE_GUARDIANS_THRESHOLD",
+  legalVeto: "EXTEND_LEGAL_VETO_THRESHOLD",
+};
+
+/**
+ * The call an approval's transaction made, and the council it went to: today's council, else the
+ * one the handler named at the block before it, whose call has the approval's function and id (the
+ * Security Council changed at block 25,134,966, and v31 changes it and the Guardians again). That
+ * council's own domain and threshold re-check it. Null when neither is found (or that block's state
+ * cannot be read).
+ */
+async function approvalSent(
+  spec: { key: ApprovalSet["key"]; group: "securityCouncil" | "guardians" },
+  today: ApprovingCouncil,
+  { txHash, id, block, handler }: { txHash: Hex; id: Hex; block: bigint; handler: Address }
+): Promise<{ council: ApprovingCouncil; decoded: NonNullable<RecordedApproval["used"]> } | null> {
+  const calls = (await callsIn(txHash)).map((call) => ({
+    to: call.to,
+    decoded: decodeApprovalCall(call.data),
+  }));
+  const toToday = calls.find((call) => isAddressEqual(call.to, today.address))?.decoded;
+  if (toToday) return { council: today, decoded: toToday };
+  const earlier = calls.find(
+    (call) =>
+      call.decoded?.functionName === APPROVAL_CALL[spec.key] &&
+      call.decoded.id.toLowerCase() === id.toLowerCase()
+  );
+  if (!earlier?.decoded) return null;
+  const named = await callFn<Address>({
+    address: handler,
+    abi: upgradeHandlerAbi,
+    functionName: spec.group,
+    blockNumber: block,
+  }).catch(() => null);
+  if (!named || !isAddressEqual(named, earlier.to)) return null;
+  const council = await earlierCouncil(earlier.to, spec.key, today.domain.chainId).catch(
+    () => null
+  );
+  return council && { council, decoded: earlier.decoded };
+}
+
+/** An earlier council's domain and threshold: constructor-set, kept for good. */
+function earlierCouncil(
+  address: Address,
+  key: ApprovalSet["key"],
+  chainId: number
+): Promise<ApprovingCouncil> {
+  const abi = key === "securityCouncil" ? securityCouncilAbi : guardiansAbi;
+  return cached(`council:${chainId}:${address}:${THRESHOLD_GETTER[key]}`, FOREVER, async () => {
+    const [domain, threshold] = await Promise.all([
+      callFn<readonly [Hex, string, string, bigint, Address]>({
+        address,
+        abi,
+        functionName: "eip712Domain",
+      }),
+      callFn<bigint>({ address, abi, functionName: THRESHOLD_GETTER[key] }),
+    ]);
+    return {
+      address: getAddress(address),
+      domain: {
+        name: domain[1],
+        version: domain[2],
+        chainId,
+        verifyingContract: getAddress(address),
+      },
+      threshold: Number(threshold),
+    };
+  });
 }
 
 /** A stale first answer has no execution: nothing is offered to send from it. */

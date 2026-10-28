@@ -103,4 +103,35 @@ describe("mainnet, read-only", () => {
       expect(executed.historical?.checks.every((c) => c.accepted)).toBe(true);
     }
   });
+
+  // The handler named another board and Security Council until block 25,134,966.
+  const EARLIER_BOARD = "0xECE8e30bFc92c2A8e11e6cb2e17B70868572E3f6";
+
+  it("an emergency upgrade executed through the earlier board (block 22018165) is found, rebuilt and re-checked against that board's own contracts", async () => {
+    const id: Hex = "0xa34bdc028de549c0fbd0374e64eb5977e78f62331f6a55f4f2211348c4902d13";
+    const detail = await getEmergencyUpgrade(id);
+    const executed = detail.executed;
+    if (!executed) throw new Error(`no execution decoded for ${id}`);
+    expect(executed.txHash).toBe(
+      "0x94818a4b7e31e0b867c7490fd299dfc2c8a811a21a6ab528be82abf75e319a69"
+    );
+    expect(executed.proposal.executor).toBe(EARLIER_BOARD);
+    expect(executed.idMatches).toBe(true);
+    // Its Security Council then was 0x66E4…, not today's: the checks run against the board's own.
+    expect(executed.historical?.checks).toHaveLength(3);
+    expect(executed.historical?.checks.every((c) => c.accepted)).toBe(true);
+    expect(detail.roles.find((r) => r.key === "zkFoundation")?.used).toHaveLength(1);
+  });
+
+  it("a Security Council approval sent to the earlier council (block 22017081) keeps its signatures and is re-checked there", async () => {
+    const id: Hex = "0xe14f960a8aa002339f482d0d2e8c8647559261996b5b733f792d0874c6e1b89e";
+    const detail = await getStandardUpgrade(id);
+    const council = detail.sets.find((s) => s.key === "securityCouncil");
+    if (!council || council.state.status !== "done") throw new Error("approval not found");
+    expect(council.state.txHash).toBe(
+      "0xf8ba6ad116310b96b0f334e1ff52a9eec48b2b18e7bb227bea15a6cf4982cd8b"
+    );
+    expect(council.used?.length).toBeGreaterThanOrEqual(6);
+    expect(council.historical?.accepted).toBe(true);
+  });
 });

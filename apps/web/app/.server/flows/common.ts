@@ -148,18 +148,25 @@ export function transactionByHash(txHash: Hex): Promise<{ to: Address | null; in
 }
 
 /**
- * The call a transaction made to `target`, also when wrapped in a Safe execTransaction (the
- * Security Council approval in 0x1defa4f7… was sent that way). Returns null for anything else.
+ * The calls a transaction made that this app can see: to its `to`, and the one inside a Safe
+ * execTransaction (the Security Council approval in 0x1defa4f7… was sent that way), outermost first.
  */
+export async function callsIn(txHash: Hex): Promise<SignedCall[]> {
+  const tx = await transactionByHash(txHash);
+  if (!tx.to) return [];
+  const calls: SignedCall[] = [{ to: tx.to, data: tx.input }];
+  try {
+    const { args } = decodeFunctionData({ abi: execTransactionAbi, data: tx.input });
+    calls.push({ to: args[0], data: args[2] });
+  } catch {}
+  return calls;
+}
+
+/** The call a transaction made to `target` (see callsIn). Returns null for anything else. */
 export async function callTo(txHash: Hex, target: Address): Promise<SignedCall | null> {
   return cached(`call-to:${txHash}:${target}`, Number.POSITIVE_INFINITY, async () => {
-    const tx = await transactionByHash(txHash);
-    if (tx.to && isAddressEqual(tx.to, target)) return { to: tx.to, data: tx.input };
-    try {
-      const { args } = decodeFunctionData({ abi: execTransactionAbi, data: tx.input });
-      if (isAddressEqual(args[0], target)) return { to: args[0], data: args[2] };
-    } catch {}
-    return null;
+    const calls = await callsIn(txHash);
+    return calls.find((call) => isAddressEqual(call.to, target)) ?? null;
   });
 }
 
