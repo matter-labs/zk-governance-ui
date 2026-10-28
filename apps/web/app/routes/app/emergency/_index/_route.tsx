@@ -128,32 +128,34 @@ export default function EmergencyList() {
                 Prepared in this browser
               </h2>
               <p className="text-slate-600 text-sm">
-                Kept only here and never sent to the server: the calls stay confidential until the
-                upgrade is executed. Members sign only the id.
+                The calls stay confidential until the upgrade is executed, so each is kept in this
+                tab only unless you keep it after the tab closes (then any page opened from a file
+                in Chrome can read it). It leaves this browser only when you simulate it or check
+                its calls through your RPC. Members sign only the id.
               </p>
             </div>
             {/* Where each stands, from the lists below once they are read. */}
-            <Suspense fallback={<PreparedEmergencies saved={saved} onRemoved={reread} />}>
+            <Suspense fallback={<PreparedEmergencies saved={saved} onChanged={reread} />}>
               <Await
                 resolve={pending}
-                errorElement={<PreparedEmergencies saved={saved} onRemoved={reread} />}
+                errorElement={<PreparedEmergencies saved={saved} onChanged={reread} />}
               >
                 {(p) => (
                   <Suspense
                     fallback={
-                      <PreparedEmergencies saved={saved} onRemoved={reread} pending={p.pending} />
+                      <PreparedEmergencies saved={saved} onChanged={reread} pending={p.pending} />
                     }
                   >
                     <Await
                       resolve={executed}
                       errorElement={
-                        <PreparedEmergencies saved={saved} onRemoved={reread} pending={p.pending} />
+                        <PreparedEmergencies saved={saved} onChanged={reread} pending={p.pending} />
                       }
                     >
                       {(e) => (
                         <PreparedEmergencies
                           saved={saved}
-                          onRemoved={reread}
+                          onChanged={reread}
                           pending={p.pending}
                           executed={e.items}
                         />

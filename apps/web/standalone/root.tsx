@@ -20,9 +20,10 @@ export default function Root() {
         <h1 className="mb-2 font-semibold text-2xl">ZKsync governance verifier</h1>
         <p className="mb-8 text-muted-foreground">
           Everything runs in this browser. It reads only from your Ethereum RPC, a ZKsync Era RPC
-          (the public one unless you set yours) and Safe's Transaction Service, and talks to
-          WalletConnect only once you connect a wallet. Your settings are kept in this browser's
-          storage, nowhere else.
+          (the public one unless you set yours) and Safe's Transaction Service. It talks to
+          WalletConnect's relay only after you press Connect wallet: while a wallet is connected,
+          and for a few minutes after a connection attempt, also across reloads. Your settings are
+          kept in this browser's storage, nowhere else.
         </p>
         <Outlet />
       </div>

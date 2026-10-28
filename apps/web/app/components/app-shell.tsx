@@ -92,10 +92,13 @@ export default function AppShell({
   status,
   children,
   wallet = true,
+  rpc = null,
 }: {
   status: StatusSource;
   children: ReactNode;
   wallet?: boolean;
+  /** The L1 RPC's host (rpc-host.ts), said in the header. */
+  rpc?: string | null;
 }) {
   const landed = useLandedStatus(status);
   const ok = landed?.ok ? landed : null;
@@ -118,13 +121,16 @@ export default function AppShell({
       <IndexProgressProvider initial={ok?.sync.index ?? null} onSettled={readStatusAgain}>
         <div className="flex min-h-screen flex-col">
           <SkipLink />
-          <Header wallet={wallet} />
+          <Header wallet={wallet} rpc={rpc} />
           <Banners />
           <Main>
             {unsupported ? (
-              <StatusProblemCard problem={unsupported} />
+              <StatusProblemCard problem={unsupported} rpc={rpc} />
             ) : (
-              <StatusBoundary source={status} problem={(p) => <StatusProblemCard problem={p} />}>
+              <StatusBoundary
+                source={status}
+                problem={(p) => <StatusProblemCard problem={p} rpc={rpc} />}
+              >
                 <Suspense fallback={<PagePending />}>{children}</Suspense>
               </StatusBoundary>
             )}
@@ -375,7 +381,7 @@ function LiveNote() {
   );
 }
 
-function Header({ wallet }: { wallet: boolean }) {
+function Header({ wallet, rpc }: { wallet: boolean; rpc: string | null }) {
   const chain = useChain();
   const live = useLive();
   return (
@@ -400,6 +406,7 @@ function Header({ wallet }: { wallet: boolean }) {
                 </>
               )}
             </WithStatus>
+            <RpcHost host={rpc} />
             <RefreshButton />
           </HeaderStatus>
           {/* Always at the top right: connect, or the connected account. */}
@@ -447,6 +454,22 @@ function NetworkPill({
         </span>
       )}
     </span>
+  );
+}
+
+// Which RPC every read goes through, by its host: the trust root, so one swapped behind the page's
+// back (any page opened from a file in Chrome can change the saved settings) is seen here.
+function RpcHost({ host }: { host: string | null }) {
+  if (!host) return null;
+  return (
+    <Link
+      to="/settings"
+      className="inline-flex min-w-0 items-center whitespace-nowrap rounded-md px-1.5 py-1.5 text-slate-600 text-xs hover:bg-slate-75 hover:text-navy-800"
+      title="The L1 RPC every read goes through (change it in Settings)"
+      data-testid="rpc-host"
+    >
+      via <span className="mono ml-1 truncate">{host}</span>
+    </Link>
   );
 }
 
@@ -554,18 +577,19 @@ function TrustBanners({ status }: { status: OkStatus }) {
   const { governance, logHistory } = status;
   const items: ReactNode[] = [];
   // The status not read again at the head served now: what the banners say (and that none shows)
-  // is as of its block.
+  // is as of its block. A block behind is the status being read again at the newest one (the
+  // pill's dot says it); said here once a whole block went by without it.
   const { block, behind } = useContentCurrency("status");
-  if (block !== null && behind !== null) {
+  if (block !== null && behind !== null && BigInt(behind) - BigInt(block) >= 2n) {
     items.push(
       <Banner key="not-reread" tone="warning" icon={Clock} testId="status-not-reread">
         <p>
           <span className="font-semibold">
             Status not re-read since block #{formatNumber(block)}.
           </span>{" "}
-          The governance contracts, trust anchors and log history could not be read again at block #
-          {formatNumber(behind)}: the warnings here, and that none is shown, are as of block #
-          {formatNumber(block)}. This updates once they are read again.
+          The governance contracts, trust anchors and log history were not read again in the blocks
+          since (the newest is #{formatNumber(behind)}): the warnings here, and that none is shown,
+          are as of block #{formatNumber(block)}. This updates once they are read again.
         </p>
       </Banner>
     );
@@ -753,29 +777,52 @@ function PagePending() {
   );
 }
 
-function StatusProblemCard({ problem }: { problem: StatusProblemValue }) {
+function StatusProblemCard({ problem, rpc }: { problem: StatusProblemValue; rpc: string | null }) {
   return (
     <div className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-[0_12px_24px_-4px_rgba(10,26,102,0.08)]">
-      <h1 className="mb-3 text-2xl">Can't read the governance contracts</h1>
-      <p className="mb-4 text-slate-950">{problem.hint}</p>
-      <pre className="mono overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-red-800">
-        {problem.error}
-      </pre>
+      <ProblemBody error={problem.error} hint={problem.hint} rpc={rpc} />
     </div>
   );
 }
 
-export function StatusProblem({ error, hint }: { error: string; hint: string }) {
+export function StatusProblem({
+  error,
+  hint,
+  rpc = null,
+}: { error: string; hint: string; rpc?: string | null }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-navy-100 px-4">
       <div className="w-full max-w-xl rounded-2xl bg-white p-8 shadow-[0_12px_24px_-4px_rgba(10,26,102,0.08)]">
         <Logo className="mb-8 h-6 w-auto" />
-        <h1 className="mb-3 text-2xl">Can't read the governance contracts</h1>
-        <p className="mb-4 text-slate-950">{hint}</p>
-        <pre className="mono overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-red-800">
-          {error}
-        </pre>
+        <ProblemBody error={error} hint={hint} rpc={rpc} />
       </div>
     </div>
+  );
+}
+
+// Why, which RPC it went through (its host), and the way to change it.
+function ProblemBody({ error, hint, rpc }: { error: string; hint: string; rpc: string | null }) {
+  return (
+    <>
+      <h1 className="mb-3 text-2xl">Can't read the governance contracts</h1>
+      <p className="mb-4 text-slate-950">{hint}</p>
+      <pre className="mono overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-red-800">
+        {error}
+      </pre>
+      <p className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        {rpc && (
+          <span className="text-slate-700" data-testid="problem-rpc">
+            L1 RPC: <span className="mono">{rpc}</span>
+          </span>
+        )}
+        <Link
+          to="/settings"
+          className="font-semibold text-brand-700 hover:underline"
+          data-testid="problem-settings"
+        >
+          Change the RPC in Settings
+        </Link>
+      </p>
+    </>
   );
 }

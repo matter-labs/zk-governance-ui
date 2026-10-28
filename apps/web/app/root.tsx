@@ -9,10 +9,12 @@ import { KeepScrollOnReload } from "@/components/keep-scroll";
 import { WalletProvider } from "@/components/providers/wallet-provider";
 import { useNonce } from "@/utils/nonce-provider";
 import { shouldRevalidateRoot } from "@/utils/revalidation";
+import { rpcHostLabel } from "@/utils/rpc-host";
 import { type CLIENT_ENV, clientEnv, env as serverEnv } from "@config/env.server";
 import { type LinksFunction, type LoaderFunctionArgs, defer } from "@remix-run/node";
 import {
   Await,
+  Link,
   Links,
   Meta,
   Outlet,
@@ -20,6 +22,7 @@ import {
   ScrollRestoration,
   type ShouldRevalidateFunction,
   useLoaderData,
+  useLocation,
 } from "@remix-run/react";
 import { Suspense } from "react";
 import { Toaster } from "react-hot-toast";
@@ -55,6 +58,8 @@ export function loader({ request }: LoaderFunctionArgs) {
     watch: watchItems(request, [watchKeys.status]),
     presence: { awayMs: serverEnv.SYNC_AWAY_MS },
     chain: shellChain(),
+    // The L1 RPC's host, said in the header: an RPC changed behind the page's back is seen.
+    rpc: rpcHostLabel(serverEnv.L1_RPC_URL),
     status,
     revs: statusRevs(status),
   });
@@ -75,7 +80,7 @@ export default function App() {
 
 /** Everything inside <body> but the toaster and scripts: shared with the single-file build. */
 export function AppBody() {
-  const { env, wagmiCookie, chain, status, presence } = useLoaderData<typeof loader>();
+  const { env, wagmiCookie, chain, status, presence, rpc } = useLoaderData<typeof loader>();
   const initialState = wagmiCookie
     ? deserializeWagmiCookie<{ state: State }>(wagmiCookie).state
     : undefined;
@@ -85,7 +90,7 @@ export function AppBody() {
   return (
     <PresenceProvider awayMs={presence.awayMs}>
       <Suspense fallback={<AppFrame />}>
-        <Await resolve={chain} errorElement={<ChainProblem status={status} />}>
+        <Await resolve={chain} errorElement={<ChainProblem status={status} rpc={rpc} />}>
           {(chain) => (
             <ChainContext.Provider value={chain}>
               <WalletProvider
@@ -94,7 +99,7 @@ export function AppBody() {
                 chainId={chain.chainId}
                 chainLabel={chain.label}
               >
-                <AppShell status={status}>
+                <AppShell status={status} rpc={rpc}>
                   <Outlet />
                 </AppShell>
               </WalletProvider>
@@ -123,10 +128,19 @@ export function AppToaster() {
   );
 }
 
-/** The RPC's chain could not be read: why, from the status (which failed on the same read). */
+/**
+ * The RPC's chain could not be read: why, from the status (which failed on the same read). Settings
+ * still opens (it needs no chain), so a dead or wrong RPC is changed from the page.
+ */
 function ChainProblem({
   status,
-}: { status: ReturnType<typeof useLoaderData<typeof loader>>["status"] }) {
+  rpc,
+}: {
+  status: ReturnType<typeof useLoaderData<typeof loader>>["status"];
+  rpc: string | null;
+}) {
+  const { pathname } = useLocation();
+  if (pathname === "/settings") return <SettingsAlone />;
   return (
     <Suspense fallback={<AppFrame />}>
       <Await
@@ -134,7 +148,8 @@ function ChainProblem({
         errorElement={
           <StatusProblem
             error="The app could not read which chain the RPC is on."
-            hint="Check L1_RPC_URL."
+            hint="Check the L1 RPC in Settings: it must be reachable and on Ethereum mainnet or Sepolia."
+            rpc={rpc}
           />
         }
       >
@@ -143,13 +158,26 @@ function ChainProblem({
             <StatusProblem
               error="The app could not read which chain the RPC is on."
               hint="Reload the page."
+              rpc={rpc}
             />
           ) : (
-            <StatusProblem error={status.error} hint={status.hint} />
+            <StatusProblem error={status.error} hint={status.hint} rpc={rpc} />
           )
         }
       </Await>
     </Suspense>
+  );
+}
+
+/** Settings while no chain can be read: the page alone, with a way back. */
+function SettingsAlone() {
+  return (
+    <div className="mx-auto max-w-3xl px-6 py-12" data-testid="settings-alone">
+      <Link to="/" className="mb-6 inline-block text-brand-700 text-sm hover:underline">
+        ← Back
+      </Link>
+      <Outlet />
+    </div>
   );
 }
 

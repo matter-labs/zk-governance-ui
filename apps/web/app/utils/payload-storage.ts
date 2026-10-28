@@ -1,14 +1,17 @@
 // Emergency payloads stay in this browser, keyed by the id they hash to, with when they were
-// prepared or loaded here: kept until removed (localStorage), so a prepared upgrade is still listed
-// after its tab is closed (Prepared in this browser, on the emergency list). They are confidential
-// until executed, so they are never sent to this app's server unless the user asks for a
-// simulation. Copies kept for a tab only (sessionStorage, before) move here when read.
+// prepared or loaded here. They are confidential until executed, and Chrome lets every page opened
+// from a file read this one's localStorage (they share the file:// origin), so a payload is kept
+// for its tab only (sessionStorage) unless the user asks to keep it after the tab closes
+// (localStorage, keepPayload). Either way it is listed under Prepared in this browser while it is
+// there. It leaves the browser only when the user asks: Simulate or Check calls (an eth_call to
+// their RPC).
 import { STORAGE_PREFIX } from "@/common/storage-prefix";
 
 const PREFIX = `${STORAGE_PREFIX}emergency-payload:`;
 const key = (id: string) => `${PREFIX}${id.toLowerCase()}`;
 
-export type SavedPayload = { id: string; payload: unknown; savedAt: number };
+/** `kept`: in localStorage, after the tab closes too; else this tab's only. */
+export type SavedPayload = { id: string; payload: unknown; savedAt: number; kept: boolean };
 
 type Stored = { payload: unknown; savedAt: number };
 
@@ -18,40 +21,45 @@ function parse(raw: string | null): Stored | null {
     const value = JSON.parse(raw) as unknown;
     if (value && typeof value === "object" && "payload" in value && "savedAt" in value)
       return value as Stored;
-    // A copy saved as the bare payload (sessionStorage, before).
+    // A copy saved as the bare payload (before).
     return { payload: value, savedAt: Date.now() };
   } catch {
     return null;
   }
 }
 
-/** Tab-only copies, moved to the copies kept until removed. */
-function migrate() {
+function read(storage: Storage, id: string): Stored | null {
   try {
-    for (const k of Object.keys(sessionStorage)) {
-      if (!k.startsWith(PREFIX)) continue;
-      const stored = parse(sessionStorage.getItem(k));
-      if (stored && !localStorage.getItem(k)) localStorage.setItem(k, JSON.stringify(stored));
-      sessionStorage.removeItem(k);
-    }
+    return parse(storage.getItem(key(id)));
+  } catch {
+    return null;
+  }
+}
+
+/** For this tab, or where it is already kept (asked for before): its time stays. */
+export function savePayload(id: string, payload: unknown) {
+  try {
+    const kept = read(localStorage, id);
+    const savedAt = kept?.savedAt ?? read(sessionStorage, id)?.savedAt ?? Date.now();
+    (kept ? localStorage : sessionStorage).setItem(
+      key(id),
+      JSON.stringify({ payload, savedAt } satisfies Stored)
+    );
   } catch {}
 }
 
-export function savePayload(id: string, payload: unknown) {
+/** Kept after the tab closes too, as the user asked (localStorage, readable by file:// pages). */
+export function keepPayload(id: string) {
   try {
-    // Prepared earlier: keeps its time.
-    const savedAt = parse(localStorage.getItem(key(id)))?.savedAt ?? Date.now();
-    localStorage.setItem(key(id), JSON.stringify({ payload, savedAt } satisfies Stored));
+    const stored = read(sessionStorage, id);
+    if (!stored) return;
+    localStorage.setItem(key(id), JSON.stringify(stored));
+    sessionStorage.removeItem(key(id));
   } catch {}
 }
 
 export function loadPayload(id: string): unknown | null {
-  migrate();
-  try {
-    return parse(localStorage.getItem(key(id)))?.payload ?? null;
-  } catch {
-    return null;
-  }
+  return (read(sessionStorage, id) ?? read(localStorage, id))?.payload ?? null;
 }
 
 export function forgetPayload(id: string) {
@@ -61,20 +69,24 @@ export function forgetPayload(id: string) {
   } catch {}
 }
 
-/** Every payload kept here, the newest first. */
-export function listPayloads(): SavedPayload[] {
-  migrate();
+function listIn(storage: Storage, kept: boolean): SavedPayload[] {
   try {
-    return Object.keys(localStorage)
+    return Object.keys(storage)
       .filter((k) => k.startsWith(PREFIX))
       .flatMap((k) => {
-        const stored = parse(localStorage.getItem(k));
-        return stored ? [{ id: k.slice(PREFIX.length), ...stored }] : [];
-      })
-      .sort((a, b) => b.savedAt - a.savedAt);
+        const stored = parse(storage.getItem(k));
+        return stored ? [{ id: k.slice(PREFIX.length), ...stored, kept }] : [];
+      });
   } catch {
     return [];
   }
+}
+
+/** Every payload kept here (this tab's and those kept after it), the newest first. */
+export function listPayloads(): SavedPayload[] {
+  const kept = listIn(localStorage, true);
+  const tab = listIn(sessionStorage, false).filter((p) => !kept.some((k) => k.id === p.id));
+  return [...tab, ...kept].sort((a, b) => b.savedAt - a.savedAt);
 }
 
 /** True for a change to the payloads kept here made in another tab. */

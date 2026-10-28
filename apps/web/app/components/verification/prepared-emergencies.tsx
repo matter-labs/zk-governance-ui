@@ -1,6 +1,6 @@
 // Emergency upgrades prepared (or loaded) in this browser: their payloads are kept only here
-// (payload-storage.ts), so the emergency list shows them before any member has signed, and after
-// the tab that prepared them was closed. Each says where it stands by the page's own lists:
+// (payload-storage.ts), for this tab unless the user keeps one after it closes, so the emergency
+// list shows them before any member has signed. Each says where it stands by the page's own lists:
 // pending in members' Safes (as Safe reports it), executed, or neither.
 import type { EmergencySummary } from "@/.server/flows/emergency";
 import { CopyButton, TxLink } from "@/components/hex";
@@ -13,11 +13,12 @@ import {
   type SavedPayload,
   forgetPayload,
   isPayloadChange,
+  keepPayload,
   listPayloads,
 } from "@/utils/payload-storage";
 import type { SerializeFrom } from "@remix-run/node";
 import { Link } from "@remix-run/react";
-import { ArrowRight, Download, Trash2 } from "lucide-react";
+import { ArrowRight, Download, Pin, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { $path } from "@/utils/path";
 
@@ -40,12 +41,13 @@ export function useSavedPayloads() {
 
 export function PreparedEmergencies({
   saved,
-  onRemoved,
+  onChanged,
   pending = null,
   executed = null,
 }: {
   saved: SavedPayload[];
-  onRemoved: () => void;
+  /** One was removed, or kept after the tab: the list is read again. */
+  onChanged: () => void;
   /** The pending and executed lists of the page, once read (null until then). */
   pending?: Summary[] | null;
   executed?: Summary[] | null;
@@ -85,6 +87,9 @@ export function PreparedEmergencies({
               <span className="block text-slate-550 text-xs">
                 Prepared here {formatTime(Math.floor(s.savedAt / 1000))}
                 {calls !== null && ` · ${calls} call${calls === 1 ? "" : "s"}`}
+                <span data-testid="prepared-kept">
+                  {s.kept ? " · kept in this browser" : " · this tab only"}
+                </span>
               </span>
             </span>
             <span
@@ -126,6 +131,27 @@ export function PreparedEmergencies({
               >
                 <Download />
               </Button>
+              {!s.kept && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Keep this payload in this browser after the tab closes? It is then in the browser's storage, where in Chrome any page opened from a file can read it until you remove it. Downloading payload.json and keeping the file safe is the alternative."
+                      )
+                    ) {
+                      keepPayload(s.id);
+                      onChanged();
+                    }
+                  }}
+                  aria-label="Keep after this tab closes"
+                  title="Keep after this tab closes"
+                  data-testid="prepared-keep"
+                >
+                  <Pin />
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -136,7 +162,7 @@ export function PreparedEmergencies({
                     )
                   ) {
                     forgetPayload(s.id);
-                    onRemoved();
+                    onChanged();
                   }
                 }}
                 aria-label="Remove from this browser"

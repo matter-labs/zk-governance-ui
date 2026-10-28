@@ -46,6 +46,9 @@ export default function SettingsPage() {
     if (result?.saved) form.current?.reset();
     if (result?.error && /WalletConnect|L2 RPC/.test(result.error)) setOptionalOpen(true);
   }, [result]);
+  // Opened from a file (the single-file build): known after hydration.
+  const [fromFile, setFromFile] = useState(false);
+  useEffect(() => setFromFile(window.location.protocol === "file:"), []);
   return (
     <div className="space-y-6">
       <PageHeader title="Settings">
@@ -54,6 +57,18 @@ export default function SettingsPage() {
           this computer.
         </p>
       </PageHeader>
+      {/* Chrome gives every page opened from a file one origin: its storage is theirs too. */}
+      {fromFile && (
+        <p
+          className="max-w-[720px] rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 text-sm"
+          data-testid="profile-note"
+        >
+          Sign from a browser profile you use only for this page. In Chrome, any other page opened
+          from a file in the same profile can read and change what this page keeps (these settings,
+          your RPC included, and the wallet session). The RPC every read goes through is named at
+          the top of each page.
+        </p>
+      )}
       <Form method="post" ref={form} className="space-y-5" autoComplete="off">
         <section
           className="space-y-6 rounded-xl border border-slate-300 bg-white p-5 sm:p-6"

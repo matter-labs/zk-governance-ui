@@ -103,7 +103,7 @@ export async function appStatus({
       return {
         ok: false,
         error: error.message,
-        hint: "Check the environment variables in the README.",
+        hint: "The L1 RPC is on a chain this app has no governance for. Save an Ethereum mainnet or Sepolia RPC in Settings.",
       };
     }
     if (error instanceof UnsupportedHandlerError) {
@@ -117,7 +117,7 @@ export async function appStatus({
     return {
       ok: false,
       error: error instanceof Error ? error.message.split("\n")[0] ?? String(error) : String(error),
-      hint: "The app could not read the governance contracts through L1_RPC_URL. Check the URL and that it points to Ethereum mainnet or Sepolia.",
+      hint: "The app could not read the governance contracts through your L1 RPC. Check it in Settings: it must be reachable and on Ethereum mainnet or Sepolia.",
     };
   }
 }

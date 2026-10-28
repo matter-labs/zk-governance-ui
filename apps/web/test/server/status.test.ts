@@ -201,7 +201,7 @@ describe("appStatus", () => {
     expect(await appStatus()).toEqual({
       ok: false,
       error: "No pinned ProtocolUpgradeHandler",
-      hint: "Check the environment variables in the README.",
+      hint: "The L1 RPC is on a chain this app has no governance for. Save an Ethereum mainnet or Sepolia RPC in Settings.",
     });
   });
 

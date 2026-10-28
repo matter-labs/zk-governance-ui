@@ -424,7 +424,7 @@ function Detail({ detail: d }: { detail: SerializeFrom<EmergencyOverview> }) {
         <div id="payload" className="scroll-mt-24">
           <Section
             title="What it will do"
-            description="Safe stores only the id. Load the payload the proposer shared; it is checked against the id here in your browser and never sent to the server."
+            description="Safe stores only the id. Load the payload the proposer shared: it is checked against the id here in your browser and kept for this tab (Prepared in this browser, on the emergency list). It leaves the browser only when you press Simulate or Check calls, as an eth_call to your RPC."
           >
             <PayloadLoader
               id={d.id}

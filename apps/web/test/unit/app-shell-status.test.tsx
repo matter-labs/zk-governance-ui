@@ -215,6 +215,22 @@ it("names the served head only over a status read there too; otherwise the statu
   expect(screen.getByTestId("network-dot")).not.toHaveClass("bg-green-500");
   expect(screen.getByTestId("network-pill")).toHaveAttribute("data-stale", "true");
   behind.unmount();
+  // One block behind: being read again at the newest block, as after every block. The pill says it
+  // (never green); no banner until a whole block went by without it.
+  const reading = render(
+    <LiveStateProvider
+      value={{
+        ...INITIAL_LIVE,
+        head: served,
+        notedAt: { status: { rev: "1", block: "21000069" } },
+      }}
+    >
+      <AppShell status={root}>page</AppShell>
+    </LiveStateProvider>
+  );
+  expect(screen.queryByTestId("status-not-reread")).not.toBeInTheDocument();
+  expect(screen.getByTestId("network-dot")).not.toHaveClass("bg-green-500");
+  reading.unmount();
   // Before the first beat, or for a status the beats do not name (a reload on its way): its own.
   render(
     <LiveStateProvider value={{ ...INITIAL_LIVE, head: served }}>
