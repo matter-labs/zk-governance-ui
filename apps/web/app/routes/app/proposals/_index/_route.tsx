@@ -236,7 +236,7 @@ function WindowSelect({ range, since }: { range: UpgradeWindow; since: string })
       <select
         value={range}
         onChange={(e) => navigate(windowPath(upgradeWindow(e.target.value)))}
-        title={`Upgrades started since block #${formatNumber(since)}`}
+        title={`Completed upgrades started since block #${formatNumber(since)}; every upgrade in progress is listed`}
         className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 pr-8 font-medium text-[13px] text-slate-800 hover:border-slate-300 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand-600/20"
         data-testid="upgrade-window"
       >

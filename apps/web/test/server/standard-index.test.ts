@@ -31,8 +31,10 @@ const state = vi.hoisted(() => ({
   chain: null as null | {
     handle: (call: { id: unknown; method: string; params: unknown[] }) => unknown;
   },
-  // id → [creationTimestamp, securityCouncilApprovalTimestamp, executed]
-  status: new Map<string, [number, number, boolean]>(),
+  // id → [creationTimestamp, securityCouncilApprovalTimestamp, executed, upgradeState if given]
+  status: new Map<string, [number, number, boolean, number?]>(),
+  // The ids whose upgradeState was read, in order.
+  stateReads: [] as string[],
   headers: [] as bigint[],
   transactions: [] as Hex[],
   // When set, the governance and status reads wait here (see `together`).
@@ -57,8 +59,9 @@ vi.mock("@/.server/rpc", async (importOriginal) => {
       await state.barrier?.("status");
       const status = state.status.get(args[0].toLowerCase());
       if (functionName === "upgradeState") {
+        state.stateReads.push(args[0].toLowerCase());
         if (!status) return UPGRADE_STATES.None;
-        return status[2] ? UPGRADE_STATES.Done : UPGRADE_STATES.LegalVetoPeriod;
+        return status[3] ?? (status[2] ? UPGRADE_STATES.Done : UPGRADE_STATES.LegalVetoPeriod);
       }
       if (functionName === "upgradeStatus") {
         const [created, approved, executed] = status ?? [0, 0, false];
@@ -201,6 +204,7 @@ beforeEach(() => {
   resetLogCaches();
   clearCache();
   state.status.clear();
+  state.stateReads = [];
   state.headers = [];
   state.transactions = [];
   state.barrier = null;
@@ -248,6 +252,45 @@ describe("listStandardUpgrades", () => {
       approvedByGuardians: false,
       legalVetoExtended: false,
     });
+  });
+
+  it("lists an upgrade in progress however old, and none finished before the window", async () => {
+    // Approved long ago and never executed: Ready until someone executes it. And one expired.
+    const READY = proposal(3);
+    const EXPIRED = proposal(4);
+    const OLD = FINAL - 400_000n;
+    const { history, chain } = upstream({
+      logs: [
+        ...puhHistory(DEPLOY, FINAL).logs,
+        startedLog(READY, OLD),
+        startedLog(EXPIRED, OLD + 10n),
+        startedLog(RECENT, RECENT_BLOCK),
+        startedLog(TAIL, TAIL_BLOCK),
+      ],
+    });
+    const [ready, expired] = [upgradeProposalId(READY), upgradeProposalId(EXPIRED)];
+    state.status.set(ready, [Number(time(OLD)), 1, false, UPGRADE_STATES.Ready]);
+    state.status.set(expired, [Number(time(OLD + 10n)), 0, false, UPGRADE_STATES.Expired]);
+
+    const list = await listStandardUpgrades({ allHistory: false });
+    expect(BigInt(list.fromBlock)).toBeGreaterThan(OLD);
+    expect(list.upgrades.map((u) => u.id)).toEqual([
+      upgradeProposalId(TAIL),
+      upgradeProposalId(RECENT),
+      ready,
+    ]);
+    expect(list.upgrades[2]).toMatchObject({ state: UPGRADE_STATES.Ready, blockNumber: `${OLD}` });
+    // The executed ones (final UpgradeExecuted) are not read at all.
+    const executed = new Set(history.upgrades.map((u) => u.id.toLowerCase()));
+    expect(state.stateReads.filter((id) => executed.has(id))).toEqual([]);
+
+    // At the next head: the expired one is not read again, the Ready one is.
+    chain.options.head = { number: HEAD + 1n };
+    invalidate("latest-block");
+    const next = await listStandardUpgrades({ allHistory: false });
+    expect(next.upgrades.map((u) => u.id)).toContain(ready);
+    expect(state.stateReads.filter((id) => id === expired)).toHaveLength(1);
+    expect(state.stateReads.filter((id) => id === ready)).toHaveLength(2);
   });
 
   it("lists every upgrade since deployment, newest first", async () => {

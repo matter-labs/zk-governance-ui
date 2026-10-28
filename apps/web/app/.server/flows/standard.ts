@@ -12,9 +12,14 @@ import {
   upgradeProposalId,
 } from "@/common/proposal";
 import { type ActionName, buildTypedData, governanceHashes } from "@/common/typed-data";
-import { UPGRADE_STATES, UPGRADE_STATE_LABELS, type UpgradeState } from "@/common/upgrade-states";
+import {
+  UPGRADE_STATES,
+  UPGRADE_STATE_LABELS,
+  type UpgradeState,
+  isUpgradeActive,
+} from "@/common/upgrade-states";
 import { type Address, type Hex, decodeEventLog, isAddressEqual, zeroAddress } from "viem";
-import { FOREVER, cachedUntil, seed } from "../cache";
+import { FOREVER, cachedUntil, peek, seed } from "../cache";
 import { CallReverted, callFn, isFinalBlock } from "../chain/call";
 import { IndexIntegrityError, type PuhEvent, puhIndex } from "../chain/puh-index";
 import type { Governance } from "../governance";
@@ -106,6 +111,7 @@ function decodeStarted(log: Awaited<ReturnType<typeof getLogs>>[number]): Starte
 }
 
 const startedKey = (id: Hex) => `started:${id.toLowerCase()}`;
+const expiredKey = (id: Hex) => `expired:${id.toLowerCase()}`;
 
 // A start from the final range never changes; one from the unfinalized tail is read again, even
 // once the boundary has passed it. Dev nodes can be rewound.
@@ -123,6 +129,7 @@ export type UpgradeSummary = StartedUpgrade & {
 
 export type UpgradeList = {
   upgrades: UpgradeSummary[];
+  /** The window's first block: upgrades started earlier are listed only while in progress. */
   fromBlock: string;
   allHistory: boolean;
   /** Pages only, never in JSON: from the last run's history while the backfill re-verifies it. */
@@ -153,32 +160,48 @@ export async function listStandardUpgrades({
 }: { allHistory: boolean; days?: bigint; freshness?: Freshness }): Promise<UpgradeList> {
   const net = await network();
   const head = await latestBlock();
-  // At least the active window: every upgrade still in progress is in the list.
+  // At least the window in which a standard upgrade can still need signatures.
   const window = days > ACTIVE_WINDOW_DAYS ? days : ACTIVE_WINDOW_DAYS;
   const windowStart = head.number - (window * DAY) / BigInt(net.blockTimeSeconds);
   const from =
     allHistory || windowStart < net.upgradeHandlerDeployBlock
       ? net.upgradeHandlerDeployBlock
       : windowStart;
-  // Complete from `from` to the head, or an error: never a partial list.
-  const strict = async () => ({
-    events: await puhIndex().events("UpgradeStarted", { fromBlock: from }),
-    provisional: false,
-  });
-  let { events, provisional } =
-    freshness === "page"
-      ? await puhIndex().eventsAnswer("UpgradeStarted", { fromBlock: from, provisional: true })
-      : await strict();
+  // "Ready" lasts until someone executes the upgrade, so one in progress can be older than any
+  // window: the whole history is read, and an upgrade started before `from` is listed while not
+  // terminal. One executed (a final UpgradeExecuted) is not read; one expired is read once.
+  // Complete from the deployment to the head, or an error: never a partial list.
+  const read = (provisional: boolean) =>
+    Promise.all([
+      puhIndex().eventsAnswer("UpgradeStarted", { provisional }),
+      puhIndex().eventsAnswer("UpgradeExecuted", { provisional }),
+    ]).then(([started, executed]) => ({
+      events: started.events,
+      // The last run's are never final: they skip nothing, so they label nothing either.
+      executed: executed.events,
+      provisional: started.provisional,
+    }));
+  let { events, executed, provisional } = await read(freshness === "page");
   // The last run's history listing one upgrade twice is not shown: this run's answers instead.
   if (provisional && new Set(events.map((e) => e.args._id.toLowerCase())).size !== events.length)
-    ({ events, provisional } = await strict());
-  const upgrades = await Promise.all(
-    events.map(async (event): Promise<UpgradeSummary> => {
+    ({ events, executed, provisional } = await read(false));
+  const done = new Set(executed.filter((e) => e.final).map((e) => e.args._id.toLowerCase()));
+  const listed = await Promise.all(
+    events.map(async (event): Promise<UpgradeSummary | null> => {
       const started = startedFrom(event);
+      const before = event.log.blockNumber < from;
+      if (before && (done.has(started.id.toLowerCase()) || peek(expiredKey(started.id)) !== null))
+        return null;
       // Only seeded: the list never waits on (or fails with) a detail lookup of the same id in
       // flight. A start from the last run's history is not final (startedTtl 0): never kept.
       seed(startedKey(started.id), started, startedTtl(event, net));
       const { state, status } = await readStatus(started.id);
+      if (before && !isUpgradeActive(state)) {
+        // Its deadline passed long ago: an expired upgrade can never be approved.
+        if (state === UPGRADE_STATES.Expired && !net.isDevNode)
+          seed(expiredKey(started.id), true, FOREVER);
+        return null;
+      }
       return {
         ...started,
         state,
@@ -190,6 +213,7 @@ export async function listStandardUpgrades({
       };
     })
   );
+  const upgrades = listed.filter((upgrade): upgrade is UpgradeSummary => upgrade !== null);
   return {
     upgrades: upgrades.reverse(),
     fromBlock: from.toString(),
