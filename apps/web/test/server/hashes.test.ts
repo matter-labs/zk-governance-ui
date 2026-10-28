@@ -125,4 +125,19 @@ describe("Safe message hashes", () => {
     );
     expect(contract).toEqual([{ owner: getAddress(owner), kind: "contract" }]);
   });
+
+  it("names only the parts the Safe checks: the first `threshold`", async () => {
+    const m = messagesFor("ApproveUpgradeSecurityCouncil", UPGRADE_ID)[0];
+    if (!m) throw new Error("no fixture message");
+    const threshold = m.confirmations.length;
+    // An approved-hash part (r = any owner, s = 0, v = 1) appended after the checked ones.
+    const anyone = "0x2222222222222222222222222222222222222222";
+    const appended = `${m.preparedSignature}${"00".repeat(12)}${anyone.slice(2)}${"00".repeat(32)}01`;
+    const owners = await recoverSafeOwners(m.messageHash, appended as `0x${string}`, threshold);
+    expect(owners.map((o) => o.owner).sort()).toEqual(
+      m.confirmations.map((c) => getAddress(c.owner)).sort()
+    );
+    const unbounded = await recoverSafeOwners(m.messageHash, appended as `0x${string}`);
+    expect(unbounded.at(-1)).toEqual({ owner: getAddress(anyone), kind: "approved-hash" });
+  });
 });

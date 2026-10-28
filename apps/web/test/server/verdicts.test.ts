@@ -154,8 +154,14 @@ describe("S-23: strict (JSON) verdicts at the head", () => {
         (c.args[1] as Hex[]).includes(getAddress(signer))
       )
     ).toBe(false);
-    expect(calls(w, "signedMessages", true)).toHaveLength(0);
-    expect(calls(w, "signedMessages", false)).toHaveLength(1);
+    // Every member Safe's on-chain approval is read: the two off the pinned proxy directly only.
+    const unpinned = [getAddress(signer), getAddress(silent)];
+    expect(calls(w, "signedMessages", true).some((c) => unpinned.includes(c.to))).toBe(false);
+    expect(
+      calls(w, "signedMessages", false)
+        .map((c) => c.to)
+        .sort()
+    ).toEqual([...unpinned].sort());
     expect(verdictCounts(head.number.toString())).toMatchObject({ fast: 1, direct: 2 });
   });
 
@@ -315,7 +321,8 @@ describe("S-19: only positives come from the aggregate", () => {
     });
     const set = await settle(verifySignatureSet(council(w)));
     expect(set.members.map((m) => m.status)).toEqual(["valid", "valid", "missing"]);
-    expect(calls(w, "signedMessages", false)).toHaveLength(1);
+    // Every member Safe's approval is read; each the aggregate left unanswered, directly.
+    expect(calls(w, "signedMessages", false)).toHaveLength(set.members.length);
   });
 
   it("SYNC_VERDICT_AGGREGATE=0's path (the fast path resting) asks everything directly", async () => {

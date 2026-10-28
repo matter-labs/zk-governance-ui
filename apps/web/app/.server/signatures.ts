@@ -109,6 +109,8 @@ export type MemberResult = {
   signedAt: string | null;
   error: string | null;
   safeWalletUrl: string | null;
+  /** A signature the page's link supplied (?sig=) that the contract rejected: never the status. */
+  rejectedFromLink?: { signature: Hex; error: string } | null;
 };
 
 export type ThresholdCheck =
@@ -315,6 +317,42 @@ type Candidate = {
   signedAt?: string;
 };
 
+// A Safe signature is 65 bytes per owner, plus a contract owner's own signature data. A candidate
+// larger than this is never sent to the node: one multi-MB copy from a bad service would fail the
+// call, and with it the whole set, instead of that member reading invalid.
+const MAX_CANDIDATE_BYTES = 65_536;
+const OVERSIZED = `Longer than ${MAX_CANDIDATE_BYTES / 1024} KB: not sent to the contract`;
+const oversized = (candidate: Candidate) =>
+  candidate.signature.length > 2 + 2 * MAX_CANDIDATE_BYTES;
+
+/** Whether `safe` approved the message on-chain (signedMessages ≠ 0). An RPC failure rejects. */
+function approvedOnChain(safe: Address, safeMessageHash: Hex, pin: Pin): Promise<boolean> {
+  return cached(
+    `signed-messages:${safe}:${safeMessageHash}:${pinKey(pin)}`,
+    VERDICT_TTL_MS,
+    async () => {
+      const fast =
+        pin.kind === "head" ? await fastSignedMessages(safe, safeMessageHash, pin.head) : null;
+      if (fast !== null) return fast !== 0n;
+      const approved = await pinned(pin, () =>
+        callFn<bigint>({
+          address: safe,
+          abi: safeAbi,
+          functionName: "signedMessages",
+          args: [safeMessageHash],
+          ...readAt(pin),
+        })
+          // A definite revert means "not approved"; an RPC failure must surface.
+          .catch((error: unknown) => {
+            if (error instanceof CallReverted) return 0n;
+            throw error;
+          })
+      );
+      return approved !== 0n;
+    }
+  );
+}
+
 export type SignatureSetParams = {
   action: ActionName;
   signerGroup: SignerGroup;
@@ -477,35 +515,6 @@ async function computeSet(
           apiUnavailable = true;
           safeApiError = error instanceof SafeApiError ? error.message : String(error);
         }
-        // A Safe can also approve a message on-chain (SignMessageLib); the signature is then empty.
-        if (!candidates.some((c) => c.source === "safe")) {
-          const approved = await cached(
-            `signed-messages:${member}:${memberHashes.safeMessageHash}:${pinKey(pin)}`,
-            VERDICT_TTL_MS,
-            async () => {
-              const fast =
-                pin.kind === "head"
-                  ? await fastSignedMessages(member, memberHashes.safeMessageHash, pin.head)
-                  : null;
-              if (fast !== null) return fast;
-              return pinned(pin, () =>
-                callFn<bigint>({
-                  address: member,
-                  abi: safeAbi,
-                  functionName: "signedMessages",
-                  args: [memberHashes.safeMessageHash],
-                  ...readAt(pin),
-                })
-                  // A definite revert means "not approved"; an RPC failure must surface.
-                  .catch((error: unknown) => {
-                    if (error instanceof CallReverted) return 0n;
-                    throw error;
-                  })
-              );
-            }
-          );
-          if (approved !== 0n) candidates.push({ source: "onchain", signature: "0x" });
-        }
       }
 
       const base = {
@@ -515,37 +524,62 @@ async function computeSet(
         hashes: memberHashes,
         safeWalletUrl: walletUrl,
       };
+      // Owners in a Safe signature: only the first `threshold` parts, the ones the Safe checks.
+      const ownersOf = (candidate: Candidate) =>
+        memberHashes && !oversized(candidate)
+          ? recoverSafeOwners(memberHashes.safeMessageHash, candidate.signature, info.threshold)
+          : Promise.resolve([]);
+      const verdictOf = (candidate: Candidate) =>
+        oversized(candidate)
+          ? Promise.resolve({ ok: false as const, error: OVERSIZED })
+          : acceptsOne(
+              params.check,
+              hashes.digest,
+              { signer: member, signature: candidate.signature },
+              candidate.source,
+              pin
+            );
+      // A Safe can also approve a message on-chain (SignMessageLib); the signature is then empty.
+      // Read for every member Safe, whatever Safe's service has: a half-confirmed copy from before
+      // the owners approved on-chain, or junk from a bad service, must not hide it. Asked with the
+      // copies' checks, so at a head they share one aggregate; tried last, so a valid copy is still
+      // the one shown.
+      const [verdicts, approved] = await Promise.all([
+        Promise.all(candidates.map(verdictOf)),
+        memberHashes ? approvedOnChain(member, memberHashes.safeMessageHash, pin) : false,
+      ]);
+      if (approved && !verdicts.some((v) => v.ok)) {
+        const onChain: Candidate = { source: "onchain", signature: "0x" };
+        candidates.push(onChain);
+        verdicts.push(await verdictOf(onChain));
+      }
       let lastError: string | null = null;
-      for (const candidate of candidates) {
-        const result = await acceptsOne(
-          params.check,
-          hashes.digest,
-          { signer: member, signature: candidate.signature },
-          candidate.source,
-          pin
-        );
+      // A signature from the page's link never sets the member's status: it is only said rejected.
+      let rejectedFromLink: { signature: Hex; error: string } | null = null;
+      for (const [i, candidate] of candidates.entries()) {
+        const result = verdicts[i] as { ok: true } | { ok: false; error: string };
         if (result.ok) {
           return {
             ...base,
             status: "valid",
             source: candidate.source,
             signature: candidate.signature,
-            owners: memberHashes
-              ? await recoverSafeOwners(memberHashes.safeMessageHash, candidate.signature)
-              : [],
+            owners: await ownersOf(candidate),
             confirmations: candidate.confirmations ?? null,
             signedAt: candidate.signedAt ?? null,
             error: null,
+            rejectedFromLink,
           };
         }
-        lastError = result.error;
+        if (candidate.source === "supplied")
+          rejectedFromLink ??= { signature: candidate.signature, error: result.error };
+        else lastError = result.error;
       }
 
-      const best = candidates.find((c) => c.source === "safe") ?? candidates[0];
+      const best =
+        candidates.find((c) => c.source === "safe") ??
+        candidates.find((c) => c.source !== "supplied");
       if (best) {
-        const owners = memberHashes
-          ? await recoverSafeOwners(memberHashes.safeMessageHash, best.signature)
-          : [];
         const collecting =
           best.source === "safe" &&
           info.threshold !== null &&
@@ -555,10 +589,11 @@ async function computeSet(
           status: collecting ? "collecting" : "invalid",
           source: best.source,
           signature: best.signature,
-          owners,
+          owners: await ownersOf(best),
           confirmations: best.confirmations ?? null,
           signedAt: best.signedAt ?? null,
           error: lastError,
+          rejectedFromLink,
         };
       }
       return {
@@ -570,6 +605,7 @@ async function computeSet(
         confirmations: null,
         signedAt: null,
         error: null,
+        rejectedFromLink,
       };
     })
   );

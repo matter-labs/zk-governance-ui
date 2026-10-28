@@ -57,17 +57,21 @@ export type RecoveredOwner = {
 
 /**
  * Owners whose signatures make up a Safe signature blob (Safe's checkNSignatures encoding).
- * Informational only: whether the blob is valid is decided on-chain.
+ * Informational only: whether the blob is valid is decided on-chain. With the Safe's `threshold`,
+ * only the parts it checks: Safe 1.3.0 reads the first `threshold` and ignores the rest, so an
+ * appended part (an approved-hash naming any owner, say) names no one.
  */
 export async function recoverSafeOwners(
   safeMessageHash: Hex,
-  signature: Hex
+  signature: Hex,
+  threshold: number | null = null
 ): Promise<RecoveredOwner[]> {
   const owners: RecoveredOwner[] = [];
   const length = size(signature);
   // Contract signatures keep their payload after the static 65-byte parts; stop before it.
   let staticEnd = length;
   for (let i = 0; i + 65 <= staticEnd; i += 65) {
+    if (threshold !== null && owners.length >= threshold) break;
     const r = slice(signature, i, i + 32);
     const s = slice(signature, i + 32, i + 64);
     const v = hexToNumber(slice(signature, i + 64, i + 65));

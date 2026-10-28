@@ -372,14 +372,70 @@ describe("verifySignatureSet", () => {
     expect(set.members[2]).toMatchObject({ status: "valid", source: "onchain", signature: "0x" });
   });
 
-  it("uses a supplied signature when it verifies, and ignores one that does not", async () => {
+  it("counts an on-chain approval though Safe has a copy of the message that does not validate", async () => {
+    const approve = (m: string) => {
+      state.approvedOnChain.add(`${m}:${hashOf(m)}`);
+      state.valid.add(`${m}:0x`);
+    };
+    // A half-confirmed copy from before the owners approved on-chain: it would read "collecting".
+    state.safeThreshold = 2;
+    inSafe(MEMBERS[1] as Hex, "0xaa", 1);
+    approve(MEMBERS[1] as string);
+    // A copy that does not validate (junk from a bad service): it would read "invalid".
+    inSafe(MEMBERS[2] as Hex, "0xbb", 2);
+    approve(MEMBERS[2] as string);
+    const set = await run();
+    for (const member of set.members.slice(1))
+      expect(member).toMatchObject({ status: "valid", source: "onchain", signature: "0x" });
+    expect(set.valid).toHaveLength(2);
+    expect(set.thresholdCheck.status).toBe("met");
+  });
+
+  it("shows a valid copy in Safe ahead of the same Safe's on-chain approval", async () => {
+    inSafe(MEMBERS[0] as Hex, "0xaa");
+    state.valid.add(`${MEMBERS[0]}:0xaa`);
+    state.approvedOnChain.add(`${MEMBERS[0]}:${hashOf(MEMBERS[0] as string)}`);
+    state.valid.add(`${MEMBERS[0]}:0x`);
+    expect((await run()).members[0]).toMatchObject({
+      status: "valid",
+      source: "safe",
+      signature: "0xaa",
+    });
+  });
+
+  it("never sends a candidate over 64 KB: it reads invalid, and the rest of the set still verifies", async () => {
+    inSafe(MEMBERS[0] as Hex, "0xaa");
+    state.valid.add(`${MEMBERS[0]}:0xaa`);
+    const huge = `0x${"ab".repeat(65_537)}` as Hex;
+    inSafe(MEMBERS[1] as Hex, huge);
+    const set = await run();
+    expect(set.members[0]?.status).toBe("valid");
+    expect(set.members[1]).toMatchObject({ status: "invalid", owners: [] });
+    expect(set.members[1]?.error).toMatch(/not sent to the contract/);
+    expect(state.checked.some((c) => c.includes(huge.slice(0, 100)))).toBe(false);
+  });
+
+  it("uses a supplied signature when it verifies; one that does not never sets the member's status", async () => {
     state.valid.add(`${MEMBERS[1]}:0xcc`);
+    inSafe(MEMBERS[0] as Hex, "0xaa", 1);
+    state.valid.add(`${MEMBERS[0]}:0xaa`);
     const set = await run(2, [
+      { signer: MEMBERS[0] as Hex, signature: "0xee" },
       { signer: MEMBERS[1] as Hex, signature: "0xcc" },
       { signer: MEMBERS[2] as Hex, signature: "0xdd" },
     ]);
     expect(set.members[1]).toMatchObject({ status: "valid", source: "supplied" });
-    expect(set.members[2]).toMatchObject({ status: "invalid", source: "supplied" });
+    // A bogus link signature: the member reads as without it, and the link's is said rejected.
+    expect(set.members[2]).toMatchObject({
+      status: "missing",
+      source: null,
+      rejectedFromLink: { signature: "0xdd", error: "Signature verification failed" },
+    });
+    expect(set.members[0]).toMatchObject({
+      status: "valid",
+      source: "safe",
+      rejectedFromLink: { signature: "0xee", error: "Signature verification failed" },
+    });
   });
 
   it("asks the contract about the combined set once the threshold is reached", async () => {
@@ -456,8 +512,9 @@ describe("what is kept", () => {
     const supplied = [{ signer: MEMBERS[1] as Hex, signature: "0xcc" as Hex }];
     await at(undefined, supplied);
     await at(undefined, supplied);
-    // Pinned to the head requests read (block 1,100), not 'latest'.
-    expect(state.checked).toEqual([
+    // Pinned to the head requests read (block 1,100), not 'latest'. Members are checked
+    // concurrently, so in no particular order.
+    expect([...state.checked].sort()).toEqual([
       `${MEMBERS[0]}:0xaa@0x44c`,
       `${MEMBERS[1]}:0xcc@0x44c`,
       `${MEMBERS[1]}:0xcc@0x44c`,

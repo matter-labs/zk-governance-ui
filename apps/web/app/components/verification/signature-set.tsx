@@ -637,6 +637,11 @@ const SOURCE_TEXT = { safe: "In Safe", onchain: "On-chain", supplied: "From URL"
 
 /** A member's signature in words: the chip's tooltip and what a screen reader says. */
 function memberStatusText(m: Serialized<MemberResult>, staleAt: string | null) {
+  const status = memberStatusOnly(m, staleAt);
+  return m.rejectedFromLink ? `${status} · the link's signature was rejected` : status;
+}
+
+function memberStatusOnly(m: Serialized<MemberResult>, staleAt: string | null) {
   if (staleAt !== null && m.status === "valid") return `Valid at #${formatNumber(staleAt)}`;
   if (staleAt !== null && m.status === "invalid") return `Rejected at #${formatNumber(staleAt)}`;
   switch (m.status) {
@@ -805,6 +810,13 @@ function MemberDetail({
       {m.error && (
         <p className="text-red-800">
           Contract response: <span className="mono">{m.error}</span>
+        </p>
+      )}
+      {/* Said apart from the status, which a signature from the link never sets. */}
+      {m.rejectedFromLink && (
+        <p className="text-slate-700" data-testid="link-signature-rejected">
+          A signature from this page's link (?sig=) was rejected by the contract:{" "}
+          <span className="mono break-all">{m.rejectedFromLink.error}</span>
         </p>
       )}
       <div className="flex flex-wrap items-center gap-4 text-slate-600 text-xs">
