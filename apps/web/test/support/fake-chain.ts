@@ -68,6 +68,8 @@ export function fakeChain(options: FakeChainOptions) {
     ranges: () => queries.map((q) => [q.from, q.to] as const),
     handle(call: FakeCall): unknown {
       if (call.method === "eth_chainId") return "0x1";
+      // What simulations are priced at (1 gwei).
+      if (call.method === "eth_gasPrice") return "0x3b9aca00";
       if (call.method === "eth_getBlockByNumber") {
         const tag = call.params[0];
         const head = options.head ?? { number: 0n };

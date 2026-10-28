@@ -16,6 +16,7 @@ const ALLOWED_METHODS = [
   "eth_call",
   "eth_getCode",
   "eth_getBalance",
+  "eth_gasPrice",
   "eth_getTransactionByHash",
   "eth_getTransactionReceipt",
   "zks_getL1BatchBlockRange",

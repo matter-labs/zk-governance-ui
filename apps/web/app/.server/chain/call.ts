@@ -132,6 +132,8 @@ export type CallRequest = {
   data: Hex;
   from?: Address;
   value?: bigint;
+  /** tx.gasprice in the call (0 when omitted); the sender must hold gas × price + value. */
+  gasPrice?: bigint;
   blockNumber?: bigint;
   stateOverride?: readonly { address: Address; balance: bigint }[];
 };
@@ -144,6 +146,7 @@ export async function ethCall(request: CallRequest, abi?: Abi): Promise<Hex> {
   const tx: Record<string, Hex> = { to: request.to, data: request.data };
   if (request.from) tx.from = request.from;
   if (request.value !== undefined) tx.value = numberToHex(request.value);
+  if (request.gasPrice !== undefined) tx.gasPrice = numberToHex(request.gasPrice);
   const params: unknown[] = [tx, blockTag(request.blockNumber)];
   if (request.stateOverride?.length) {
     params.push(

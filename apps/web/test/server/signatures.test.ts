@@ -13,6 +13,7 @@ import {
   InternalRpcError,
   RpcRequestError,
   getAddress,
+  numberToHex,
 } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -24,7 +25,7 @@ import {
   outOfGas,
   revertWith,
 } from "../support/fake-calls";
-import { FakeRpcError } from "../support/fake-jsonrpc";
+import { type FakeCall, FakeRpcError } from "../support/fake-jsonrpc";
 
 // verifySignatureSet with the chain and Safe replaced by fakes: which candidate counts, and which
 // status a member gets, must depend only on what the contract says. The contract sits behind a
@@ -1251,10 +1252,23 @@ describe("an RPC failure is never a verdict", () => {
 
 describe("simulate", () => {
   const execution = { to: COUNCIL, data: "0x1234" as Hex, value: "0" };
+  // The node a simulation is priced from: eth_gasPrice and the base fee of the block simulated at
+  // (2 and 1 gwei unless a test says otherwise). Every eth_call is answered by `reply`.
+  const prices = { gasPrice: "0x77359400", baseFee: "0x3b9aca00" };
+  const node = (reply: (call: FakeCall) => unknown) => (call: FakeCall) => {
+    if (call.method === "eth_gasPrice") return prices.gasPrice;
+    if (call.method === "eth_getBlockByHash" || call.method === "eth_getBlockByNumber")
+      return { baseFeePerGas: prices.baseFee };
+    return reply(call);
+  };
+  beforeEach(() => {
+    prices.gasPrice = "0x77359400";
+    prices.baseFee = "0x3b9aca00";
+  });
 
   it("is ok, reverted only on a definite revert, and skipped on an RPC failure", async () => {
     let reply: unknown = "0x";
-    const fake = fakeCallLane(() => reply);
+    const fake = fakeCallLane(node(() => reply));
     state.lane = fake.lane;
     expect(await simulate(execution)).toEqual({ status: "ok" });
 
@@ -1269,8 +1283,8 @@ describe("simulate", () => {
     }
   });
 
-  it("funds the stand-in sender for a payable call, and simulates as a given executor", async () => {
-    const fake = fakeCallLane(() => "0x");
+  it("funds the stand-in sender for a payable call and its gas, and simulates as a given executor", async () => {
+    const fake = fakeCallLane(node(() => "0x"));
     state.lane = fake.lane;
     await simulate({ ...execution, value: "7" });
     expect(fake.calls()[0]?.params).toEqual([
@@ -1279,9 +1293,10 @@ describe("simulate", () => {
         data: "0x1234",
         from: "0x000000000000000000000000000000000000dEaD",
         value: "0x7",
+        gasPrice: "0x77359400",
       },
       "latest",
-      { "0x000000000000000000000000000000000000dEaD": { balance: "0xde0b6b3a7640007" } },
+      { "0x000000000000000000000000000000000000dEaD": { balance: "0xd3c21bcecceda1000007" } },
     ]);
 
     const executor = MEMBERS[0] as Address;
@@ -1299,7 +1314,7 @@ describe("simulate", () => {
 
     it("asks once per head, at its number; a definite answer is kept, an RPC failure is not", async () => {
       let reply: unknown = "0x";
-      const fake = fakeCallLane(() => reply);
+      const fake = fakeCallLane(node(() => reply));
       state.lane = fake.lane;
       // Labelled with the block it was simulated at.
       expect(await simulate(execution, { keep: true })).toEqual({ status: "ok", atBlock: "1100" });
@@ -1326,8 +1341,8 @@ describe("simulate", () => {
 
     it("tells apart senders, values and calldata, and asks once more when the node does not know the head", async () => {
       let notFound = 1;
-      const fake = fakeCallLane(() =>
-        notFound-- > 0 ? new FakeRpcError(-32000, "header not found") : "0x"
+      const fake = fakeCallLane(
+        node(() => (notFound-- > 0 ? new FakeRpcError(-32000, "header not found") : "0x"))
       );
       state.lane = fake.lane;
       expect(await simulate(execution, { keep: true })).toMatchObject({ status: "ok" });
@@ -1343,11 +1358,59 @@ describe("simulate", () => {
 
     it("on a dev node: at 'latest', never kept", async () => {
       state.devNode = true;
-      const fake = fakeCallLane(() => "0x");
+      const fake = fakeCallLane(node(() => "0x"));
       state.lane = fake.lane;
       await simulate(execution, { keep: true });
       await simulate(execution, { keep: true });
       expect(fake.calls().map((c) => c.params[1])).toEqual(["latest", "latest"]);
+    });
+  });
+
+  describe("at the current gas price", () => {
+    // A contract reading tx.gasprice, like Era's Mailbox for a veto's L2 transaction: the value
+    // sent must cover a cost that grows with it (here 0.02 ETH suffices up to 20 gwei).
+    const pricedCall = (call: FakeCall) => {
+      const tx = call.params[0] as { value?: Hex; gasPrice?: Hex };
+      const cost = BigInt(tx.gasPrice ?? "0x0") * 1_000_000n;
+      return BigInt(tx.value ?? "0x0") >= cost ? "0x" : revertWith("msg.value too low");
+    };
+    const veto = { ...execution, value: (2n * 10n ** 16n).toString() };
+
+    it("reverts as sent when the gas price makes the signed value too low", async () => {
+      state.lane = fakeCallLane(node(pricedCall)).lane;
+      prices.gasPrice = numberToHex(20n * 10n ** 9n);
+      expect(await simulate(veto)).toEqual({ status: "ok" });
+      prices.gasPrice = numberToHex(22n * 10n ** 9n);
+      expect(await simulate(veto)).toEqual({ status: "reverted", error: "msg.value too low" });
+    });
+
+    it("never prices below the base fee of the block simulated at", async () => {
+      const fake = fakeCallLane(node(pricedCall));
+      state.lane = fake.lane;
+      prices.gasPrice = numberToHex(10n ** 9n);
+      prices.baseFee = numberToHex(30n * 10n ** 9n);
+      expect(await simulate(veto, { keep: true })).toMatchObject({ status: "reverted" });
+      expect((fake.calls()[0]?.params[0] as { gasPrice: Hex }).gasPrice).toBe(prices.baseFee);
+    });
+
+    it("reads the price once per head, and a failed read is not simulated, never ok", async () => {
+      const fake = fakeCallLane(node(() => "0x"));
+      state.lane = fake.lane;
+      await simulate(execution, { keep: true });
+      await simulate({ ...execution, data: "0x5678" }, { keep: true });
+      const priceReads = fake.upstream.posts
+        .flatMap((p) => p.calls)
+        .filter((c) => c.method === "eth_gasPrice");
+      expect(priceReads).toHaveLength(1);
+
+      state.head = { ...state.head, number: 1_101n, hash: `0x${"a2".repeat(32)}` };
+      state.lane = fakeCallLane((call) =>
+        call.method === "eth_gasPrice" ? internalError() : node(() => "0x")(call)
+      ).lane;
+      expect(await simulate(execution, { keep: true })).toMatchObject({
+        status: "skipped",
+        reason: expect.stringMatching(/^RPC error: /),
+      });
     });
   });
 

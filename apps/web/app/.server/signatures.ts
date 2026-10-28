@@ -21,12 +21,14 @@ import {
   ContractFunctionRevertedError,
   isAddressEqual,
   keccak256,
+  numberToHex,
 } from "viem";
 import { createHash } from "node:crypto";
 import { FOREVER, cached, cachedUntil, concurrencyLimit, linkStore, peek } from "./cache";
 import {
   type CallRequest,
   CallReverted,
+  UpstreamError,
   callFn,
   callRaw,
   classify,
@@ -46,6 +48,7 @@ import {
 import { type SafeInfo, safeInfo, safeInfoKey } from "./governance";
 import {
   type BlockRef,
+  lanes,
   latestBlock,
   network,
   rpcGeneration,
@@ -1511,8 +1514,13 @@ export type Simulation = (
   watch?: WatchItem;
 };
 
-// A funded stand-in sender, so payable calls (the L2 veto forwards txMintValue) can be simulated.
+// A funded stand-in sender, so payable calls (the L2 veto forwards txMintValue) can be simulated,
+// at the current gas price: its balance covers the value and gas at any plausible price.
 const SIMULATION_SENDER: Address = "0x000000000000000000000000000000000000dEaD";
+const SIMULATION_FUNDS = 10n ** 24n;
+
+/** A call to simulate; `atGasPrice`: priced at the L1 gas price where it is simulated (gasPriceAt). */
+export type SimulationRequest = CallRequest & { atGasPrice?: boolean };
 
 export type SimulateOptions = {
   /**
@@ -1523,7 +1531,11 @@ export type SimulateOptions = {
   page?: boolean;
 };
 
-/** eth_call of the execution transaction against the latest state. Nothing is sent. */
+/**
+ * eth_call of the execution transaction against the latest state, at the current gas price (a
+ * contract reading tx.gasprice runs as it will when sent: Era's Mailbox prices a veto's L2
+ * transaction with it, and a signed txMintValue below that cost reverts). Nothing is sent.
+ */
 export async function simulate(
   execution: {
     to: Address;
@@ -1539,8 +1551,8 @@ export async function simulate(
       to: execution.to,
       data: execution.data,
       value,
-      stateOverride:
-        value > 0n ? [{ address: SIMULATION_SENDER, balance: value + 10n ** 18n }] : undefined,
+      stateOverride: [{ address: SIMULATION_SENDER, balance: value + SIMULATION_FUNDS }],
+      atGasPrice: true,
     },
     options
   );
@@ -1551,7 +1563,7 @@ export async function simulate(
  * transaction, and never kept.
  */
 export async function simulateCall(
-  request: CallRequest,
+  request: SimulationRequest,
   { keep = false, page = false }: SimulateOptions = {}
 ): Promise<Simulation> {
   if (keep && request.blockNumber === undefined) {
@@ -1575,9 +1587,9 @@ export async function simulateCall(
 // The simulations pages show, by key, for the engine: at most 64, each for 24 hours.
 const SIMULATIONS_LIMIT = 64;
 const SIMULATION_FOR_MS = 24 * 60 * 60_000;
-const simulations = new Map<string, { request: CallRequest; shownAt: number }>();
+const simulations = new Map<string, { request: SimulationRequest; shownAt: number }>();
 
-function simulationKeyOf(request: CallRequest): string {
+function simulationKeyOf(request: SimulationRequest): string {
   const overrides = (request.stateOverride ?? [])
     .map(({ address, balance }) => `${address.toLowerCase()}=${balance}`)
     .join(",");
@@ -1587,6 +1599,7 @@ function simulationKeyOf(request: CallRequest): string {
     request.value ?? 0n,
     request.data.toLowerCase(),
     overrides,
+    request.atGasPrice ? "priced" : "",
   ].join("|");
   return `sim:${createHash("sha256").update(identity).digest("hex").slice(0, 32)}`;
 }
@@ -1596,7 +1609,11 @@ export const simulationContent = (simulation: Simulation) =>
     ? { status: simulation.status, error: simulation.error }
     : { status: simulation.status };
 
-function watchSimulation(request: CallRequest, head: BlockRef, simulation: Simulation): Simulation {
+function watchSimulation(
+  request: SimulationRequest,
+  head: BlockRef,
+  simulation: Simulation
+): Simulation {
   const key = simulationKeyOf(request);
   simulations.delete(key);
   simulations.set(key, { request, shownAt: Date.now() });
@@ -1639,7 +1656,7 @@ export async function resimulateOnScreen(
   return tally;
 }
 
-function simulateAtHead(request: CallRequest, head: BlockRef): Promise<Simulation> {
+function simulateAtHead(request: SimulationRequest, head: BlockRef): Promise<Simulation> {
   const pin: Pin = { kind: "head", head };
   const overrides = (request.stateOverride ?? [])
     .map(({ address, balance }) => `${address.toLowerCase()}=${balance}`)
@@ -1651,6 +1668,7 @@ function simulateAtHead(request: CallRequest, head: BlockRef): Promise<Simulatio
     request.value ?? 0n,
     keccak256(request.data),
     overrides,
+    request.atGasPrice ? "priced" : "",
     pinKey(pin),
   ].join(":");
   return cachedUntil(key, async () => {
@@ -1659,16 +1677,51 @@ function simulateAtHead(request: CallRequest, head: BlockRef): Promise<Simulatio
   });
 }
 
-async function simulateAt(request: CallRequest, pin?: Pin): Promise<Simulation> {
+async function simulateAt(
+  { atGasPrice, ...request }: SimulationRequest,
+  pin?: Pin
+): Promise<Simulation> {
   try {
-    if (pin) await pinned(pin, () => ethCall({ ...request, blockNumber: blockOf(pin) }));
-    else await ethCall(request);
+    const call = atGasPrice ? { ...request, gasPrice: await gasPriceAt(pin) } : request;
+    if (pin) await pinned(pin, () => ethCall({ ...call, blockNumber: blockOf(pin) }));
+    else await ethCall(call);
     return { status: "ok" };
   } catch (error) {
     return error instanceof CallReverted
       ? { status: "reverted", error: error.reason }
       : skipped(error);
   }
+}
+
+/**
+ * The L1 gas price a transaction sent now pays, for a simulation: the node's eth_gasPrice, never
+ * below the base fee of the block simulated at (an eth_call priced under it fails). Read once per
+ * head; at 'latest' every time.
+ */
+function gasPriceAt(pin?: Pin): Promise<bigint> {
+  const read = async () => {
+    const block =
+      pin?.kind === "head"
+        ? lanes().call.request<unknown>("eth_getBlockByHash", [pin.head.hash, false])
+        : lanes().call.request<unknown>("eth_getBlockByNumber", [
+            pin?.kind === "block" ? numberToHex(pin.blockNumber) : "latest",
+            false,
+          ]);
+    const [price, header] = await Promise.all([
+      lanes().call.request<unknown>("eth_gasPrice", []),
+      block,
+    ]);
+    if (typeof price !== "string" || !/^0x[0-9a-fA-F]+$/.test(price))
+      throw new UpstreamError("eth_gasPrice returned no number");
+    const baseFee = (header as { baseFeePerGas?: unknown } | null)?.baseFeePerGas;
+    const floor =
+      typeof baseFee === "string" && /^0x[0-9a-fA-F]+$/.test(baseFee) ? BigInt(baseFee) : 0n;
+    const suggested = BigInt(price);
+    return suggested > floor ? suggested : floor;
+  };
+  return pin && pin.kind !== "latest"
+    ? cached(`gas-price:${pinKey(pin)}`, VERDICT_TTL_MS, read)
+    : read();
 }
 
 function skipped(error: unknown): Simulation {
