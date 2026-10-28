@@ -372,7 +372,13 @@ describe("on a mainnet fork", () => {
     const byMember = (m: Address) => council?.members.find((x) => x.member === m);
     expect(byMember(onchainMember)).toMatchObject({ status: "valid", source: "onchain" });
     expect(byMember(suppliedMember)).toMatchObject({ status: "valid", source: "supplied" });
-    expect(byMember(strangerSafe)).toMatchObject({ status: "invalid", source: "supplied" });
+    // A link signature the contract rejects never sets the status: the member reads as without it
+    // (Safe's API down: unavailable), and the rejection is said apart.
+    expect(byMember(strangerSafe)).toMatchObject({
+      status: "unavailable",
+      source: null,
+      rejectedFromLink: { error: expect.any(String) },
+    });
     expect(council?.safeApiError).toMatch(/503/);
     expect(council?.members.filter((m) => m.status === "unavailable").length).toBeGreaterThan(0);
   });
