@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["main", "dev"]
+  # Run workflow builds the branch picked in GitHub's menu: every job checks out that same ref.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A push to main never cancels the run checking the commit before it: the README says any commit's
+  # dist/verifier.html can be downloaded, so each one keeps its completed check.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  ci-for-lint:
+    name: Lint
+    uses: ./.github/workflows/lint-reusable.yml
+
+  ci-for-test:
+    name: Test
+    needs: [ci-for-lint]
+    uses: ./.github/workflows/test-reusable.yml
+
+  ci-for-test-integration-web:
+    name: Integration web
+    needs: [ci-for-lint, ci-for-test]
+    uses: ./.github/workflows/test-integration-web-reusable.yml
+    secrets: inherit

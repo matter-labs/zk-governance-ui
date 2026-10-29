@@ -1,0 +1,70 @@
+name: Workflow template for testing jobs
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-
+      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b # v2.4.1
+      - uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+        with:
+          node-version: 20
+          cache: "pnpm"
+      - run: pnpm install
+      # The single-file pages: mainnet, the Sepolia test deployment, and an ecosystem's.
+      - run: pnpm build
+      # dist/verifier.html is committed, for people to download: it must be this commit's build.
+      - name: Check the committed dist/verifier.html
+        run: |
+          if [ -n "$(git status --porcelain -- dist/verifier.html)" ]; then
+            echo "::error file=dist/verifier.html::not this commit's build: run corepack pnpm build and commit dist/verifier.html"
+            echo "committed: $(git show HEAD:dist/verifier.html 2>/dev/null | sha256sum)"
+            echo "built:     $(sha256sum < dist/verifier.html)"
+            exit 1
+          fi
+      - run: pnpm --filter web build:sepolia-test
+      - run: pnpm --filter web build:ecosystem
+        env:
+          ECOSYSTEM: testnet-3
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: verifier-html
+          path: |
+            dist/verifier.html
+            dist/verifier-sepolia-test.html
+            dist/verifier-testnet-3.html
+          if-no-files-found: error
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      SKIP_ENV_VALIDATION: true
+    steps:
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-
+      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b # v2.4.1
+      - uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+        with:
+          node-version: 20
+          cache: "pnpm"
+      - run: pnpm install
+      - run: pnpm test

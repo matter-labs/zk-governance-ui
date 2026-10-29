@@ -1,0 +1,68 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.8.3/schema.json",
+  "files": {
+    "include": [
+      "*.js",
+      "*.jsx",
+      "*.cjs",
+      "*.mjs",
+      "*.ts",
+      "*.tsx",
+      "*.cts",
+      "*.mts",
+      "*.json",
+      "*.yml",
+      "*.yaml",
+      "*.md"
+    ],
+    "ignore": [
+      "packages/e2e/playwright-report",
+      "packages/e2e/test-results",
+      "apps/web/test/fixtures"
+    ]
+  },
+  "organizeImports": {
+    "enabled": false
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space"
+  },
+  "javascript": {
+    "formatter": {
+      "trailingCommas": "es5",
+      "semicolons": "always",
+      "indentStyle": "space",
+      "lineWidth": 100
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedImports": "warn",
+        "noUnusedVariables": "warn"
+      },
+      "suspicious": {
+        "noExplicitAny": "off",
+        "noAsyncPromiseExecutor": "off"
+      },
+      "a11y": {
+        "useValidAriaRole": "off"
+      },
+      "nursery": {
+        "useSortedClasses": {
+          "fix": "safe",
+          "level": "info",
+          "options": {}
+        }
+      }
+    }
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  }
+}
