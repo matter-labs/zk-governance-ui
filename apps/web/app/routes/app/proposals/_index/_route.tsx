@@ -150,7 +150,10 @@ function UpgradeTable({
   range: UpgradeWindow;
   refresh?: Refresh;
 }) {
-  const active = result.upgrades.filter((u) => isUpgradeActive(u.state));
+  // The list comes newest first. In progress: in the order they started (oldest first), the order
+  // they are approved and executed in, so one L2 proposal's L1 proposals read #1, #2, … as on Tally.
+  // Completed: newest first.
+  const active = result.upgrades.filter((u) => isUpgradeActive(u.state)).reverse();
   const past = result.upgrades.filter((u) => !isUpgradeActive(u.state));
   const switching = useSwitchingWindow();
   // The list as the beats name it: one not read again at the head served now is shown as of its
