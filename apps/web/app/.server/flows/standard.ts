@@ -377,6 +377,12 @@ export type ApprovalSet = {
   title: string;
   set: SignatureSet;
   state: SetState;
+  /**
+   * While the legal veto period runs: when it ends (unix seconds). Members can sign already (the
+   * signatures are not tied to the upgrade's state), but the handler takes the approval only once
+   * the upgrade is Waiting, so no transaction is built before then.
+   */
+  sendsAfter: number | null;
   execution: ExecutionView | null;
   // For a completed action: the signatures the transaction used, and whether Safe has the same bytes.
   used: UsedSignature[] | null;
@@ -646,13 +652,16 @@ async function getUpgradeExecution(d: StandardUpgradeCore, page = false) {
 }
 
 function approvalSpecs(d: StandardUpgradeCore) {
-  const { governance: gov, status, state } = d;
+  const { governance: gov, status, state, timeline } = d;
+  // Signatures are gathered from the legal veto period on; the approval is sent once Waiting.
+  const vetoPeriod = state === UPGRADE_STATES.LegalVetoPeriod;
   const specs: {
     key: ApprovalSet["key"];
     title: string;
     action: "ApproveUpgradeSecurityCouncil";
     threshold: number;
     state: SetState;
+    sendsAfter: number | null;
     event: "UpgradeApprovedBySecurityCouncil";
   }[] = [
     {
@@ -664,9 +673,13 @@ function approvalSpecs(d: StandardUpgradeCore) {
       state:
         status.securityCouncilApprovalTimestamp !== 0
           ? { status: "done", detail: "Approved by the Security Council", txHash: null }
-          : state === UPGRADE_STATES.Waiting
+          : state === UPGRADE_STATES.Waiting || vetoPeriod
             ? { status: "open" }
             : { status: "closed", detail: closedReason(state, "Waiting") },
+      sendsAfter:
+        vetoPeriod && status.securityCouncilApprovalTimestamp === 0
+          ? timeline.legalVetoEndsAt
+          : null,
     },
   ];
 
@@ -878,6 +891,7 @@ function streamStandardUpgradeSets(
       title: spec.title,
       set,
       state: spec.state,
+      sendsAfter: spec.sendsAfter,
       execution,
       used: null,
       historical: null,
@@ -888,7 +902,9 @@ function streamStandardUpgradeSets(
         await executionFor(
           set,
           spec.state,
-          (valid) => approvalExecution(contract.address, id, valid),
+          // Not before the legal veto period ends: the handler would reject it.
+          (valid) =>
+            spec.sendsAfter === null ? approvalExecution(contract.address, id, valid) : null,
           { page: freshness === "page" }
         )
       )

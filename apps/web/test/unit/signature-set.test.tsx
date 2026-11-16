@@ -1240,3 +1240,58 @@ describe("Your signature: the ZK Foundation's own transaction", () => {
     );
   });
 });
+
+describe("Your signature: the Security Council's approval during the legal veto period", () => {
+  const met = {
+    ...(set as object),
+    valid: [
+      { signer: MEMBER_A, signature: "0xaa" },
+      { signer: MEMBER_B, signature: "0xbb" },
+    ],
+    thresholdCheck: { status: "met", checkedWith: "checkSignatures" },
+  } as never;
+
+  it("at its threshold, says when it can be sent and offers nothing to send before", () => {
+    render(
+      <YourSignature
+        hint="h"
+        actions={[
+          {
+            key: "council",
+            title: "Security Council approval",
+            set: met,
+            state: { status: "open" },
+            execution: null,
+            sendsAfter: 1_792_500_000,
+          },
+        ]}
+      />
+    );
+    expect(screen.getByTestId("your-signature")).toHaveTextContent("Threshold met");
+    expect(screen.getByTestId("later-row-council")).toHaveTextContent(
+      "Security Council approval · threshold metIt can be sent once the legal veto period ends, Oct 20, 2026, 12:40 UTC. Then anyone can send it: the contract checks the signatures, not the sender."
+    );
+    expect(screen.queryByTestId("review-send")).toBeNull();
+  });
+
+  it("below its threshold, members sign as in Waiting, and nothing is said about sending", () => {
+    wallet.address = MEMBER_C;
+    render(
+      <YourSignature
+        hint="h"
+        actions={[
+          {
+            key: "council",
+            title: "Security Council approval",
+            set,
+            state: { status: "open" },
+            execution: null,
+            sendsAfter: 1_792_500_000,
+          },
+        ]}
+      />
+    );
+    expect(screen.getByTestId("sign-button")).toBeInTheDocument();
+    expect(screen.queryByTestId("later-row-council")).toBeNull();
+  });
+});

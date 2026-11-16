@@ -30,6 +30,8 @@ const state = vi.hoisted(() => ({
   },
   // Every simulateCall: the call and its options.
   simulations: [] as { request: { from: string; to: string; data: string }; options: unknown }[],
+  // What each executionFor was given to build its transaction from the valid signatures.
+  builds: [] as ((valid: never[]) => unknown)[],
 }));
 
 // The upgrade's start, Security Council approval (block 201, APPROVAL_TX), the ZK Foundation's
@@ -125,7 +127,10 @@ vi.mock("@/.server/flows/l2", () => ({ findL2ProposalForUpgrade: async () => sta
 vi.mock("@/.server/flows/common", async (original) => ({
   ...(await original<typeof import("@/.server/flows/common")>()),
   hasArchiveState: () => state.archive(),
-  executionFor: async () => null,
+  executionFor: async (_set: unknown, _state: unknown, build: (valid: never[]) => unknown) => {
+    state.builds.push(build);
+    return null;
+  },
 }));
 vi.mock("@/.server/signatures", async (original) => ({
   ...(await original<typeof import("@/.server/signatures")>()),
@@ -188,6 +193,7 @@ beforeEach(() => {
   state.firstStale = false;
   state.upgrade = { state: UPGRADE_STATES.Done, status: [100, 200, false, false, true] };
   state.simulations = [];
+  state.builds = [];
   state.signatures = new Promise<void>((resolve) => {
     release = resolve;
   });
@@ -510,4 +516,52 @@ describe("the ZK Foundation's steps", () => {
       ]);
     }
   );
+});
+
+describe("the Security Council's approval", () => {
+  const DAY = 86_400;
+
+  it("gathers signatures during the legal veto period, with no transaction until it ends", async () => {
+    state.upgrade = {
+      state: UPGRADE_STATES.LegalVetoPeriod,
+      status: [100, 0, false, false, false],
+    };
+    release();
+    const [council] = await (await loadStandardUpgrade(ID)).freshSets;
+    // Open to sign; sent once the legal veto period (3 days here) ends.
+    expect(council).toMatchObject({
+      key: "securityCouncil",
+      state: { status: "open" },
+      sendsAfter: 100 + 3 * DAY,
+      execution: null,
+    });
+    // The handler would reject the approval before then: none is built, whatever the signatures.
+    expect(state.builds).not.toHaveLength(0);
+    for (const build of state.builds) expect(build([])).toBeNull();
+  });
+
+  it("is sent once Waiting: open, nothing to wait for, its transaction built", async () => {
+    state.upgrade = { state: UPGRADE_STATES.Waiting, status: [100, 0, false, false, false] };
+    release();
+    const [council] = await (await loadStandardUpgrade(ID)).freshSets;
+    expect(council).toMatchObject({ state: { status: "open" }, sendsAfter: null });
+    expect(state.builds.at(-1)?.([])).toMatchObject({
+      to: MAINNET.securityCouncil,
+      functionName: "approveUpgradeSecurityCouncil",
+    });
+  });
+
+  it("is closed once the upgrade is past Waiting without it, and done once approved", async () => {
+    state.upgrade = { state: UPGRADE_STATES.Expired, status: [100, 0, false, false, false] };
+    release();
+    const [expired] = await (await loadStandardUpgrade(ID)).freshSets;
+    expect(expired).toMatchObject({
+      state: { status: "closed", detail: "The upgrade expired without approval" },
+      sendsAfter: null,
+    });
+    clearCache();
+    state.upgrade = { state: UPGRADE_STATES.Ready, status: [100, 200, false, false, false] };
+    const [approved] = await (await loadStandardUpgrade(ID)).freshSets;
+    expect(approved).toMatchObject({ state: { status: "done" }, sendsAfter: null });
+  });
 });

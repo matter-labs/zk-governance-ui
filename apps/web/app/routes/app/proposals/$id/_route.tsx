@@ -302,6 +302,7 @@ function Detail({
                         state: s.state,
                         execution: s.execution,
                         executionToLabel: "SecurityCouncil",
+                        sendsAfter: s.sendsAfter,
                       }))}
                       safeCalls={safeCalls}
                     />

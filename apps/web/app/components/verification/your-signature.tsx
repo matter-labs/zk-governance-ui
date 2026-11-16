@@ -21,13 +21,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/utils/cn";
-import { formatNumber } from "@/utils/format";
+import { formatNumber, formatTime } from "@/utils/format";
 import type { SerializeFrom } from "@remix-run/node";
 import {
   CheckCircle2,
   ChevronRight,
   Circle,
   CircleDashed,
+  Clock,
   Loader2,
   PenLine,
   Send,
@@ -55,6 +56,11 @@ export type SignAction = {
   /** The transaction the group's signatures make, once at its threshold (anyone sends it). */
   execution?: Serialized<ExecutionView> | null;
   executionToLabel?: string;
+  /**
+   * When it can be sent, if not yet (unix seconds): a standard upgrade's Security Council approval
+   * gathers signatures during the legal veto period, and is sent once it ends.
+   */
+  sendsAfter?: number | null;
 };
 
 /**
@@ -111,6 +117,14 @@ export function YourSignature({
   });
   // A first answer from an older block never makes a transaction to send.
   const sending = open.filter((a) => a.execution && a.set.stale !== true);
+  // At its threshold, to be sent later (the legal veto period still runs): said when.
+  const later = open.filter(
+    (a) =>
+      !a.execution &&
+      a.sendsAfter != null &&
+      a.set.stale !== true &&
+      a.set.thresholdCheck.status === "met"
+  );
   const dialogOf = (kind: "sign" | "send", key: string) => ({
     open: dialog === `${kind}:${key}`,
     onOpenChange: (next: boolean) => setDialog(next ? `${kind}:${key}` : null),
@@ -121,7 +135,7 @@ export function YourSignature({
   const toSend = sending[0];
   const toCreate = yours[0];
 
-  if (signing.length === 0 && sending.length === 0 && yours.length === 0)
+  if (signing.length === 0 && sending.length === 0 && yours.length === 0 && later.length === 0)
     return (
       <section
         ref={setPanel}
@@ -154,6 +168,10 @@ export function YourSignature({
               <>
                 <Send aria-hidden className="h-4 w-4" /> Your Safe's transaction
               </>
+            ) : sending.length === 0 ? (
+              <>
+                <Clock aria-hidden className="h-4 w-4" /> Threshold met
+              </>
             ) : (
               <>
                 <Send aria-hidden className="h-4 w-4" /> Ready to send
@@ -179,6 +197,22 @@ export function YourSignature({
               live={live}
               dialog={dialogOf("send", action.key)}
             />
+          ))}
+          {later.map((action) => (
+            <div
+              key={`later:${action.key}`}
+              className="space-y-1 px-4 py-4 sm:px-5"
+              data-testid={`later-row-${action.key}`}
+            >
+              <p className="font-semibold text-[15px] text-navy-800">
+                {action.title} · threshold met
+              </p>
+              <p className="text-[13.5px] text-slate-700">
+                It can be sent once the legal veto period ends,{" "}
+                <span className="font-medium text-navy-800">{formatTime(action.sendsAfter)}</span>.
+                Then anyone can send it: the contract checks the signatures, not the sender.
+              </p>
+            </div>
           ))}
           {yours.map((call) => (
             <SafeCallRow
