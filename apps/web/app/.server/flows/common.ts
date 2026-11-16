@@ -1,4 +1,4 @@
-import { guardiansAbi, securityCouncilAbi } from "@/common/abis";
+import { securityCouncilAbi } from "@/common/abis";
 import type { Execution, MemberSignature } from "@/common/execution";
 import {
   type AbiEvent,
@@ -189,21 +189,15 @@ export function compareUsedSignatures(
   });
 }
 
-/** Decodes approve*(id, signers, signatures) / extendLegalVeto from SecurityCouncil or Guardians. */
+/** Decodes approveUpgradeSecurityCouncil(id, signers, signatures) sent to a SecurityCouncil. */
 export function decodeApprovalCall(data: Hex) {
-  for (const abi of [securityCouncilAbi, guardiansAbi]) {
-    try {
-      const { functionName, args } = decodeFunctionData({ abi, data });
-      if (
-        functionName === "approveUpgradeSecurityCouncil" ||
-        functionName === "approveUpgradeGuardians" ||
-        functionName === "extendLegalVeto"
-      ) {
-        const [id, signers, signatures] = args as [Hex, readonly Address[], readonly Hex[]];
-        return { functionName, id, signers, signatures };
-      }
-    } catch {}
-  }
+  try {
+    const { functionName, args } = decodeFunctionData({ abi: securityCouncilAbi, data });
+    if (functionName === "approveUpgradeSecurityCouncil") {
+      const [id, signers, signatures] = args as [Hex, readonly Address[], readonly Hex[]];
+      return { functionName, id, signers, signatures };
+    }
+  } catch {}
   return null;
 }
 

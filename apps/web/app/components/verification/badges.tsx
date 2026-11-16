@@ -33,11 +33,18 @@ export function UpgradeStateBadge({ state }: { state: UpgradeState }) {
   );
 }
 
-export function SetStateBadge({ state }: { state: SetState }) {
+export function SetStateBadge({
+  state,
+  open = "Open for signatures",
+}: {
+  state: SetState;
+  /** What an open step waits for (a ZK Foundation step: its Safe's transaction). */
+  open?: string;
+}) {
   if (state.status === "open") {
     return (
       <Badge variant="info">
-        <Clock /> Open for signatures
+        <Clock /> {open}
       </Badge>
     );
   }

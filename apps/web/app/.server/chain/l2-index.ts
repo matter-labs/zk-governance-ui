@@ -128,7 +128,7 @@ export function indexedL2Governors(
   if (fromBlock === null) return null;
   const addresses: Address[] = [];
   let pins = 0;
-  for (const kind of ["token", "govOps", "protocol"] as const) {
+  for (const kind of ["protocol"] as const) {
     const pin = pinned.l2Governors[kind];
     const used = net.l2Governors[kind];
     if (pin) pins++;

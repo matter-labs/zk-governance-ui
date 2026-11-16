@@ -12,7 +12,9 @@ From `apps/web`:
 ECOSYSTEM=testnet-3 corepack pnpm build:ecosystem   # dist/verifier-testnet-3.html at the repo root
 ```
 
-A config's `codePins` are keccak256 of the runtime code at the Security Council, Guardians and
-Emergency Upgrade Board, and of a member Safe's proxy, with the Safes' singleton and fallback
-handler (all members alike); `null` reads every check on-chain instead. Its handler's legal veto
-and delay are 0 for TestnetProtocolUpgradeHandler, else 3 and 1.
+The page reads the handler as it is after ZIP-19 (Security Council, ZK Foundation Safe, two-party
+Emergency Upgrade Board, no Guardians); a handler from before it is reported as not supported. A
+config's `codePins` are keccak256 of the runtime code at the Security Council and the Emergency
+Upgrade Board, and of a member Safe's proxy, with the Safes' singleton and fallback handler (all
+members alike); `null` reads every check on-chain instead. Its handler's legal veto and delay are
+0 for TestnetProtocolUpgradeHandler, else 3 and 1.

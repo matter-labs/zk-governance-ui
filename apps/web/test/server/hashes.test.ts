@@ -31,8 +31,14 @@ describe("governance typed data", () => {
 
   it("parses every governance message Safe stores and rejects look-alikes", () => {
     const all = Object.values(SAFE_MESSAGES).flat();
-    expect(all.length).toBeGreaterThan(100);
-    for (const m of all) expect(parseGovernanceTypedData(m.message, 1)).not.toBeNull();
+    // The Guardians' messages from before ZIP-19 are no governance action any more.
+    const retired = new Set(["ExecuteEmergencyUpgradeGuardians", "CancelL2GovernorProposal"]);
+    const current = all.filter((m) => !retired.has(m.message.primaryType));
+    expect(current.length).toBeGreaterThan(80);
+    for (const m of current) expect(parseGovernanceTypedData(m.message, 1)).not.toBeNull();
+    const guardians = all.filter((m) => retired.has(m.message.primaryType));
+    expect(guardians.length).toBeGreaterThan(50);
+    for (const m of guardians) expect(parseGovernanceTypedData(m.message, 1)).toBeNull();
 
     const sample = messagesFor("ApproveUpgradeSecurityCouncil", UPGRADE_ID)[0]?.message;
     if (!sample) throw new Error("fixture missing");
@@ -51,16 +57,27 @@ describe("governance typed data", () => {
   });
 
   it("normalizes Safe's JSON (decimal strings, lowercase addresses) without changing the digest", () => {
-    const veto = Object.values(SAFE_MESSAGES)
+    const freeze = Object.values(SAFE_MESSAGES)
       .flat()
-      .find((m) => m.message.primaryType === "CancelL2GovernorProposal");
-    if (!veto) throw new Error("fixture missing");
-    const parsed = parseGovernanceTypedData(veto.message, 1);
-    expect(parsed?.message.l2GovernorAddress).toBe(
-      getAddress(veto.message.message.l2GovernorAddress as string)
+      .find((m) => m.message.primaryType === "SoftFreeze");
+    if (!freeze) throw new Error("fixture missing");
+    const { domain, message } = freeze.message;
+    const parsed = parseGovernanceTypedData(
+      {
+        ...freeze.message,
+        domain: { ...domain, verifyingContract: String(domain.verifyingContract).toLowerCase() },
+        message: { ...message, validUntil: Number(message.validUntil) },
+      },
+      1
     );
+    expect(parsed?.domain.verifyingContract).toBe(MAINNET.securityCouncil);
+    expect(parsed?.message.validUntil).toBe(message.validUntil);
     const signable = toSignable(parsed as NonNullable<typeof parsed>);
-    expect(typeof signable.message.l2GasLimit).toBe("bigint");
+    expect(typeof signable.message.validUntil).toBe("bigint");
+    const { digest } = governanceHashes(parsed as NonNullable<typeof parsed>);
+    expect(safeMessageHashes(1, getAddress(freeze.safe), digest).safeMessageHash).toBe(
+      freeze.messageHash
+    );
   });
 });
 

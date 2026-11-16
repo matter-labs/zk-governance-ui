@@ -13,14 +13,15 @@ Addresses in `deployment.json`, written by `deploy.ts`.
   no delay after approval) behind a `TransparentUpgradeableProxy` that owns its own `ProxyAdmin`, as on
   mainnet.
 - **SecurityCouncil** (8 members: 4 to approve an upgrade, 3 for a soft freeze, 6 for a hard freeze,
-  an unfreeze or a new soft-freeze threshold), **Guardians** (8 members: 5 to approve or veto, 2 to
-  extend a legal veto) and the **EmergencyUpgradeBoard**. zk-governance at `58df93f`, compiled as
-  mainnet's: the same code as mainnet's but for immutables and metadata.
-- **17 member Safes**, each Safe 1.3.0 (as on mainnet) with one owner, `0xF378…E885`, and threshold 1:
-  8 for the Security Council, 8 for the Guardians, 1 for the ZK Foundation.
-- **ZKsyncTestStub** in every role the contracts give ZKsync (Era, the chain type manager, the
-  bridgehub, the bridges). It proves any L2 message, so anyone can start any upgrade, and accepts any
-  call: freezes and vetoes succeed and change nothing on ZKsync.
+  an unfreeze or a new soft-freeze threshold), the two-party **EmergencyUpgradeBoard** (Security
+  Council and ZK Foundation), and the ZK Foundation Safe in the handler's `zkFoundation` role, as
+  after ZIP-19 (no Guardians). zk-governance at `d9bd203`, compiled as mainnet's: the same code as
+  mainnet's but for immutables and metadata.
+- **9 member Safes**, each Safe 1.3.0 (as on mainnet) with one owner, `0xF378…E885`, and threshold 1:
+  8 for the Security Council, 1 for the ZK Foundation.
+- **ZKsyncTestStub** in every role the contracts give ZKsync (the chain type managers, the
+  bridgehub, the bridges, the chain asset handler). It proves any L2 message, so anyone can start any upgrade, and accepts any
+  call: freezes succeed and change nothing on ZKsync.
 - The L2 side is ZKsync Era Sepolia's: its RPC and governors. The handler's `L2_PROTOCOL_GOVERNOR`
   is the Sepolia ZkProtocolGovernor's timelock.
 - Upgrades started at deployment (`seeds.ts`): a copy of a 31-call mainnet upgrade (it signs and
@@ -32,17 +33,19 @@ Addresses in `deployment.json`, written by `deploy.ts`.
 1. Open `dist/verifier-sepolia-test.html` (repo root). In Settings, save a Sepolia RPC with log history (Infura or
    Alchemy) and a Safe API key. The page keeps its own settings, wallet session and payloads
    (`sepolia-test:` keys), apart from `verifier.html`'s.
-2. In Safe{Wallet} on Sepolia, connect `0xF378…E885`: it owns all 17 Safes. Address book → Import
+2. In Safe{Wallet} on Sepolia, connect `0xF378…E885`: it owns all 9 Safes. Address book → Import
    `safe-address-book.csv` names them.
 3. In the page, **Connect wallet** → Copy link. In Safe{Wallet}, open a member Safe → WalletConnect →
    paste the link. **Your signature** then offers that member's signature. To sign as another member,
    disconnect and connect that Safe.
 4. Approvals and executions can be sent from any wallet with Sepolia ETH.
 
-To try: a Security Council approval (4 signatures) makes an upgrade ready at once; the Guardians'
-approval (5) makes it ready 30 days after it started. Freeze requests, emergency upgrades (prepare one
-in the page) and their execution work as on mainnet. Not here: extending a legal veto (there is no
-legal veto period), and vetoes need an active proposal on Sepolia's L2 governors.
+To try: a Security Council approval (4 signatures) makes an upgrade ready at once; the ZK
+Foundation's approval (connect the ZK Foundation Safe: **Your Safe's transaction** → Review and
+create puts `approveUpgradeZkFoundation` in that Safe, to confirm and execute in Safe{Wallet}) makes
+it ready 30 days after it started. Freeze requests, emergency upgrades
+(prepare one in the page) and their execution work as on mainnet. Not here: extending a legal veto
+(there is no legal veto period).
 
 ## Build, deploy, start more upgrades
 

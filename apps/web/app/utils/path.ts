@@ -9,9 +9,6 @@ type Paths = {
   "/app/emergency/:id": { id: string };
   "/app/freeze": never;
   "/app/freeze/:action": { action: string };
-  "/app/l2-cancellations": never;
-  "/app/l2-cancellations/new": never;
-  "/app/l2-cancellations/:id": { id: string };
   "/app/transactions/:hash": { hash: string };
   "/settings": never;
   "/resources/refresh": never;

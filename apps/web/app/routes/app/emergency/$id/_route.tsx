@@ -261,7 +261,7 @@ function HeldDetail({
               <AsOfContent asOf={held.asOf}>
                 <Section
                   title="Signatures"
-                  description="All three are needed. The board checks each group through its EIP-1271 isValidSignature."
+                  description="Both are needed. The board checks each through its EIP-1271 isValidSignature."
                 >
                   <ApprovalGroups count={kept.roles.length} unfoldOpen={false}>
                     {kept.roles.map((r) => (
@@ -299,7 +299,7 @@ function HeldDetail({
 
 function SignaturesPending() {
   return (
-    <LoadingCard label="Checking Security Council, Guardian and Foundation signatures at the newest block…" />
+    <LoadingCard label="Checking Security Council and Foundation signatures at the newest block…" />
   );
 }
 
@@ -440,7 +440,7 @@ function Detail({ detail: d }: { detail: SerializeFrom<EmergencyOverview> }) {
 
       <Suspense
         fallback={
-          <LoadingCard label="Checking Security Council, Guardian and Foundation signatures on-chain…" />
+          <LoadingCard label="Checking Security Council and Foundation signatures on-chain…" />
         }
       >
         <Await
@@ -537,11 +537,20 @@ function ExecutedContent({
           {
             label: "Board's checks before execution",
             value: (
-              <BoardChecks
-                historical={historical}
-                block={BigInt(execution.blockNumber) - 1n}
-                check={provenance ? check : null}
-              />
+              <span className="block space-y-1">
+                <BoardChecks
+                  historical={historical}
+                  block={BigInt(execution.blockNumber) - 1n}
+                  check={provenance ? check : null}
+                />
+                {execution.beforeZip19 && (
+                  <span className="block text-slate-600 text-xs" data-testid="board-before-zip19">
+                    Executed through an Emergency Upgrade Board from before ZIP-19, which also
+                    checked the Guardians' signatures; only the Security Council's and the ZKsync
+                    Foundation's are shown.
+                  </span>
+                )}
+              </span>
             ),
             testId: "board-checks",
           },
@@ -641,7 +650,6 @@ function SignatureSections({
     return emergencyExecution(
       board as Hex,
       check.proposal,
-      role("guardians"),
       role("securityCouncil"),
       zkf.set.valid[0].signature as Hex
     );
@@ -651,7 +659,7 @@ function SignatureSections({
     <div className="space-y-8">
       <Section
         title="Signatures"
-        description="All three are needed. The board checks each group through its EIP-1271 isValidSignature."
+        description="Both are needed. The board checks each through its EIP-1271 isValidSignature."
       >
         <ApprovalGroups count={d.roles.length} unfoldOpen={false}>
           {d.roles.map((r) => (
@@ -678,7 +686,10 @@ function SignatureSections({
       </Section>
 
       {!executed && (
-        <Section title="Execute" description="Needs the payload and all three groups' thresholds.">
+        <Section
+          title="Execute"
+          description="Needs the payload and both signer groups' thresholds."
+        >
           {execution ? (
             <ExecutionPanel
               execution={execution}
@@ -699,7 +710,7 @@ function SignatureSections({
                 ? "The payload above does not match this id, so there is nothing to execute."
                 : !check?.ok
                   ? "Load the payload above to build the execution transaction."
-                  : "The transaction is built once all three signer groups above reach their thresholds at the newest block."}
+                  : "The transaction is built once both signer groups above reach their thresholds at the newest block."}
             </p>
           )}
         </Section>

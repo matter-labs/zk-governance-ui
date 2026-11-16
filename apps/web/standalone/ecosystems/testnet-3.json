@@ -18,16 +18,13 @@
       "explorerUrl": "https://block-explorer.zksync-era-testnet.zksync.dev",
       "diamond": "0xbB94d8F4080d5CD34d6215399f26771990f38A1d",
       "governors": {
-        "protocol": "0xbD0C5e503BCFBD81C1Cb2F1CdCB8b11598816A7F",
-        "token": null,
-        "govOps": null
+        "protocol": "0xbD0C5e503BCFBD81C1Cb2F1CdCB8b11598816A7F"
       },
       "governorsFirstLogBlock": 10537,
       "governorsDeployBlock": 10537
     },
     "codePins": {
       "securityCouncil": "0x604081c44c8d9cbaea88b8a0d7725397510a66b4d7608462924d97bda9936693",
-      "guardians": "0xf22f3a49a0f167ec836c05172d9d16cd2776dec422c5be03947c4d42fbd5625f",
       "emergencyUpgradeBoard": "0x18b0b77f5608050db950e2681b432cc59bcbc6ecb2ce668caca5c0f6fe9a1d09",
       "safeProxy": "0xb89c1b3bdf2cf8827818646bce9a8f6e372885f8c55e5c07acbd307cb133b000",
       "safeSingleton": "0xfb1bffC9d739B8D520DaF37dF666da4C687191EA",
@@ -54,7 +51,6 @@
     "0x4d1f2681162694D785a7978b69C9a24d4ADc671F": "PUH ProxyAdmin",
     "0x7E1Ba159c077F333A6B269e15D8A5a12916E6Fc2": "EmergencyUpgradeBoard",
     "0x2498CAc75FA29b5c30e126C23ABcCc5ac5119821": "SecurityCouncil",
-    "0x495C4c47C722b3A1C6cc8C9293Fc701C421eA57A": "Guardians",
     "0x86FF47C9682f9f83dBC1C45C7929C0C5aFEf3E8b": "ZK Foundation Safe",
     "0xbB94d8F4080d5CD34d6215399f26771990f38A1d": "Chain 312 Diamond",
     "0xcd759c9bB599e4463771A45F289B318A93Bb07E4": "Chain 312 ChainAdmin",

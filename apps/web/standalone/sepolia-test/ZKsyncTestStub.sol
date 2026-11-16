@@ -3,12 +3,11 @@
 pragma solidity 0.8.24;
 
 /// @title ZKsync stand-in for the Sepolia test deployment of the governance contracts
-/// @notice Takes every role the ProtocolUpgradeHandler and Guardians give to ZKsync contracts (Era's
-/// diamond proxy, the chain type manager, the bridgehub, the bridges, the chain asset handler), so
-/// their write paths can be tried on Sepolia without touching ZKsync:
-/// - proveL2MessageInclusion accepts any message, so anyone can start any upgrade;
-/// - every other call (a freeze, a pause, a veto's requestL2Transaction, an upgrade's calls)
-///   succeeds and is logged.
+/// @notice Takes every role the ProtocolUpgradeHandler after ZIP-19 gives to ZKsync contracts (the
+/// two chain type managers, the bridgehub, the bridges, the chain asset handler), so its write paths
+/// can be tried on Sepolia without touching ZKsync:
+/// - the bridgehub's proveL2MessageInclusion accepts any message, so anyone can start any upgrade;
+/// - every other call (a freeze, a pause, an upgrade's calls) succeeds and is logged.
 /// TEST ONLY: with it, starting an upgrade proves nothing.
 contract ZKsyncTestStub {
     struct L2Message {
@@ -19,8 +18,9 @@ contract ZKsyncTestStub {
 
     event Called(address indexed caller, uint256 value, bytes data);
 
-    /// @notice Any message is "included": the handler starts whatever upgrade it is given.
-    function proveL2MessageInclusion(uint256, uint256, L2Message calldata, bytes32[] calldata)
+    /// @notice As the bridgehub: any message is "included" on any chain, so the handler starts
+    /// whatever upgrade it is given.
+    function proveL2MessageInclusion(uint256, uint256, uint256, L2Message calldata, bytes32[] calldata)
         external
         pure
         returns (bool)
@@ -28,10 +28,18 @@ contract ZKsyncTestStub {
         return true;
     }
 
-    /// @notice One chain, ZKsync Era Sepolia's id, so a freeze freezes (here: logs) one chain.
+    /// @notice As the bridgehub: one chain, ZKsync Era Sepolia's id, so a freeze freezes (here: logs)
+    /// one chain.
     function getAllZKChainChainIDs() external pure returns (uint256[] memory ids) {
         ids = new uint256[](1);
         ids[0] = 300;
+    }
+
+    /// @notice As the bridgehub: every chain's chain type manager is this stub (the handler's
+    /// ERA_CHAIN_TYPE_MANAGER), so the handler freezes and unfreezes it through freezeChain and
+    /// unfreezeChain, which the fallback logs.
+    function chainTypeManager(uint256) external view returns (address) {
+        return address(this);
     }
 
     fallback() external payable {

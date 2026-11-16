@@ -121,7 +121,7 @@ describe("puhIndex", () => {
     expect(found?.args._id).toBe(emergency.id);
     expect(found?.log.blockNumber).toBe(emergency.block);
     expect(await index.events("EmergencyUpgradeExecuted")).toHaveLength(20);
-    expect(await index.events("UpgradeApprovedByGuardians")).toEqual([]);
+    expect(await index.events("UpgradeApprovedByZkFoundation")).toEqual([]);
   });
 
   it("rejects two execution events for one id", async () => {

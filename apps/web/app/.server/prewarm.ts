@@ -55,14 +55,10 @@ async function step<T>(
   }
 }
 
-/** The Safes whose message listings the governance pages read: SC and Guardians members, ZKF. */
+/** The Safes whose message listings the governance pages read: Security Council members, ZKF. */
 export function governanceSafes(gov: Governance): Address[] {
   const unique = new Map<string, Address>();
-  for (const safe of [
-    ...gov.securityCouncil.members,
-    ...gov.guardians.members,
-    gov.emergencyUpgradeBoard.zkFoundation,
-  ])
+  for (const safe of [...gov.securityCouncil.members, gov.emergencyUpgradeBoard.zkFoundation])
     if (!unique.has(safe.toLowerCase())) unique.set(safe.toLowerCase(), safe);
   return [...unique.values()];
 }

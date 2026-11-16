@@ -1,9 +1,10 @@
 import { clearCache } from "@/.server/cache";
+import { zkFoundationCall } from "@/common/execution";
 import { type UpgradeProposal, upgradeProposalId } from "@/common/proposal";
 import { type buildTypedData, governanceHashes } from "@/common/typed-data";
 import { UPGRADE_STATES } from "@/common/upgrade-states";
-import { zeroAddress } from "viem";
-import { beforeEach, expect, it, vi } from "vitest";
+import { type Hex, zeroAddress } from "viem";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { APPROVAL_TX, MAINNET, TRANSACTIONS, UPGRADE_ID } from "../support/fixtures";
 
 const state = vi.hoisted(() => ({
@@ -20,12 +21,26 @@ const state = vi.hoisted(() => ({
   archive: (async () => true) as () => Promise<boolean>,
   // A page's first answer for each set: stale (an older block's result) or the fresh result.
   firstStale: false,
+  // The handler's upgradeState and upgradeStatus (creationTimestamp,
+  // securityCouncilApprovalTimestamp, zkFoundationApproval, zkFoundationExtendedLegalVeto,
+  // executed).
+  upgrade: { state: 6, status: [100, 200, false, false, true] } as {
+    state: number;
+    status: readonly [number, number, boolean, boolean, boolean];
+  },
+  // Every simulateCall: the call and its options.
+  simulations: [] as { request: { from: string; to: string; data: string }; options: unknown }[],
 }));
 
-// The upgrade's start, Security Council approval (block 201, APPROVAL_TX) and execution come
-// from the handler's log index.
+// The upgrade's start, Security Council approval (block 201, APPROVAL_TX), the ZK Foundation's
+// approval and legal veto extension (their own transactions) and execution come from the
+// handler's log index.
 const PROPOSAL: UpgradeProposal = { calls: [], executor: zeroAddress, salt: UPGRADE_ID };
 const ID = upgradeProposalId(PROPOSAL);
+const ZKF_TX: Record<string, Hex> = {
+  UpgradeApprovedByZkFoundation: `0x${"f1".repeat(32)}`,
+  UpgradeLegalVetoExtended: `0x${"f2".repeat(32)}`,
+};
 vi.mock("@/.server/chain/puh-index", async (original) => {
   const single = async (name: string, id: string) => {
     state.lookups.push(name);
@@ -35,7 +50,8 @@ vi.mock("@/.server/chain/puh-index", async (original) => {
         log: { blockNumber: 100n, transactionHash: APPROVAL_TX },
       };
     if (name === "UpgradeExecuted") await state.execution;
-    return { args: { _id: id }, log: { blockNumber: 201n, transactionHash: APPROVAL_TX } };
+    const transactionHash = ZKF_TX[name] ?? APPROVAL_TX;
+    return { args: { _id: id }, log: { blockNumber: 201n, transactionHash } };
   };
   return {
     ...(await original<typeof import("@/.server/chain/puh-index")>()),
@@ -54,8 +70,8 @@ vi.mock("@/.server/rpc", () => {
   const l1 = {
     getTransaction: async () => TRANSACTIONS[APPROVAL_TX],
     readContract: async ({ functionName }: { functionName: string }) => {
-      if (functionName === "upgradeState") return UPGRADE_STATES.Done;
-      if (functionName === "upgradeStatus") return [100, 200, false, false, true];
+      if (functionName === "upgradeState") return state.upgrade.state;
+      if (functionName === "upgradeStatus") return [...state.upgrade.status];
       throw new Error(`Unexpected ${functionName}`);
     },
   };
@@ -92,12 +108,7 @@ vi.mock("@/.server/governance", () => ({
         verifyingContract: MAINNET.securityCouncil,
       },
     },
-    guardians: {
-      address: MAINNET.guardians,
-      members: [],
-      thresholds: { approveUpgrade: 5, extendLegalVeto: 2 },
-      domain: { name: "Guardians", version: "1", chainId: 1, verifyingContract: MAINNET.guardians },
-    },
+    zkFoundation: MAINNET.zkFoundation,
   }),
 }));
 
@@ -154,6 +165,10 @@ vi.mock("@/.server/signatures", async (original) => ({
           stale: true,
         }
       : fresh,
+  simulateCall: async (request: { from: string; to: string; data: string }, options: unknown) => {
+    state.simulations.push({ request, options });
+    return { status: "ok" };
+  },
 }));
 
 const { getStandardUpgradeOverview, loadStandardUpgrade, getStandardUpgrade } = await import(
@@ -171,6 +186,8 @@ beforeEach(() => {
   state.devNode = true;
   state.archive = async () => true;
   state.firstStale = false;
+  state.upgrade = { state: UPGRADE_STATES.Done, status: [100, 200, false, false, true] };
+  state.simulations = [];
   state.signatures = new Promise<void>((resolve) => {
     release = resolve;
   });
@@ -189,7 +206,7 @@ it("shows the core and finishes signature checks while L2 discovery and executio
   expect(loading.overview.started.idMatches).toBe(true);
   expect(loading.overview).not.toHaveProperty("l2Proposal");
   release();
-  expect(await loading.sets).toHaveLength(3);
+  expect(await loading.sets).toHaveLength(1);
   expect(await loading.evidence).toHaveLength(1);
   releaseL2();
   releaseExecution();
@@ -217,7 +234,7 @@ it("keeps JSON waiting for execution and L2 discovery after signatures finish", 
     return detail;
   });
   release();
-  await vi.waitFor(() => expect(state.verified).toBe(3));
+  await vi.waitFor(() => expect(state.verified).toBe(1));
   expect(finished).toBe(false);
   releaseExecution();
   await Promise.resolve();
@@ -263,7 +280,7 @@ it("resolves current signatures without waiting for the recorded approvals' re-c
   release();
   const loading = await loadStandardUpgrade(ID);
   const sets = await loading.sets;
-  expect(sets).toHaveLength(3);
+  expect(sets).toHaveLength(1);
   // The current signatures alone: the recorded transaction and its signatures come with the
   // evidence.
   expect(sets[0]).toMatchObject({
@@ -286,19 +303,12 @@ it("resolves current signatures without waiting for the recorded approvals' re-c
   expect(answered).toBe(false);
   open();
   const evidence = await loading.setEvidence;
-  expect(evidence.map((e) => e.key)).toEqual(["securityCouncil", "guardians", "legalVeto"]);
+  expect(evidence.map((e) => e.key)).toEqual(["securityCouncil"]);
   expect(evidence[0]).toMatchObject({
     state: { status: "done", txHash: APPROVAL_TX },
     historical: { block: "200", accepted: true, error: null },
   });
   expect(evidence[0]?.used).toHaveLength(6);
-  // Sets without a recorded approval keep their own state.
-  expect(evidence[1]).toEqual({
-    key: "guardians",
-    state: sets[1]?.state,
-    used: null,
-    historical: null,
-  });
   const detail = await full;
   expect(detail.sets[0]).toMatchObject({
     key: "securityCouncil",
@@ -314,11 +324,11 @@ it("keeps the JSON engine waiting for verified sets and Safe comparisons", async
     finished = true;
     return detail;
   });
-  await vi.waitFor(() => expect(state.verified).toBe(3));
+  await vi.waitFor(() => expect(state.verified).toBe(1));
   expect(finished).toBe(false);
   release();
   const detail = await full;
-  expect(detail.sets).toHaveLength(3);
+  expect(detail.sets).toHaveLength(1);
   expect(detail.sets[0]?.historical?.accepted).toBe(true);
   expect(detail.sets[0]?.used).toHaveLength(6);
   expect(detail.sets[0]?.used?.every((s) => s.matchesSafe === null)).toBe(true);
@@ -396,22 +406,16 @@ it("pages get each set's stale first answer at once, without an execution, and t
   const first = await loading.sets;
   expect(first.map((s) => [s.key, s.set.stale, s.set.verifiedAtBlock, s.execution])).toEqual([
     ["securityCouncil", true, "990", null],
-    ["guardians", true, "990", null],
-    ["legalVeto", true, "990", null],
   ]);
   expect(freshIn).toBe(false);
   release();
   const fresh = await loading.freshSets;
-  expect(fresh.map((s) => s.set.stale)).toEqual([false, false, false]);
+  expect(fresh.map((s) => s.set.stale)).toEqual([false]);
   // The recorded evidence is merged with the strict sets.
-  expect((await loading.setEvidence).map((e) => e.key)).toEqual([
-    "securityCouncil",
-    "guardians",
-    "legalVeto",
-  ]);
+  expect((await loading.setEvidence).map((e) => e.key)).toEqual(["securityCouncil"]);
   // JSON is the strict result only, whatever a page would show first.
   const json = await getStandardUpgrade(ID);
-  expect(json.sets.map((s) => s.set.stale)).toEqual([false, false, false]);
+  expect(json.sets.map((s) => s.set.stale)).toEqual([false]);
 });
 
 it("a page's first answer that already is the strict result is the same set", async () => {
@@ -419,4 +423,91 @@ it("a page's first answer that already is the strict result is the same set", as
   const loading = await loadStandardUpgrade(ID, { freshness: "page" });
   const [first, fresh] = await Promise.all([loading.sets, loading.freshSets]);
   first.forEach((set, i) => expect(set).toBe(fresh[i]));
+});
+
+describe("the ZK Foundation's steps", () => {
+  const call = (fn: "approveUpgradeZkFoundation" | "extendLegalVeto") =>
+    zkFoundationCall(MAINNET.upgradeHandler, fn, ID);
+
+  it("are done from the upgrade's status, with the transaction from each one's event, and never simulated", async () => {
+    state.upgrade = { state: UPGRADE_STATES.Done, status: [100, 0, true, true, true] };
+    release();
+    const loading = await loadStandardUpgrade(ID);
+    const { safe, steps } = await loading.zkFoundation;
+    expect(safe).toBe(MAINNET.zkFoundation);
+    expect(steps.map((step) => [step.key, step.state, step.call, step.simulation])).toEqual([
+      [
+        "approval",
+        expect.objectContaining({
+          status: "done",
+          detail: "Approved by the ZK Foundation",
+          txHash: ZKF_TX.UpgradeApprovedByZkFoundation,
+        }),
+        call("approveUpgradeZkFoundation"),
+        null,
+      ],
+      [
+        "legalVeto",
+        expect.objectContaining({
+          status: "done",
+          detail: "Legal veto period extended to 7 days",
+          txHash: ZKF_TX.UpgradeLegalVetoExtended,
+        }),
+        call("extendLegalVeto"),
+        null,
+      ],
+    ]);
+    expect(state.lookups).toEqual(
+      expect.arrayContaining(["UpgradeApprovedByZkFoundation", "UpgradeLegalVetoExtended"])
+    );
+    expect(state.simulations).toEqual([]);
+    // JSON waits for them.
+    expect((await getStandardUpgrade(ID)).zkFoundation).toEqual({ safe, steps });
+  });
+
+  it("are closed once the upgrade is executed without them, with no event looked up", async () => {
+    release();
+    const detail = await getStandardUpgrade(ID);
+    expect(
+      detail.zkFoundation.steps.map((step) => [step.key, step.state, step.simulation])
+    ).toEqual([
+      ["approval", { status: "closed", detail: "The upgrade was executed" }, null],
+      [
+        "legalVeto",
+        { status: "closed", detail: "Only possible during the legal veto period" },
+        null,
+      ],
+    ]);
+    expect(state.lookups).not.toContain("UpgradeApprovedByZkFoundation");
+    expect(state.lookups).not.toContain("UpgradeLegalVetoExtended");
+    expect(state.simulations).toEqual([]);
+  });
+
+  it.each([
+    ["approval", UPGRADE_STATES.Waiting, "approveUpgradeZkFoundation"],
+    ["legalVeto", UPGRADE_STATES.LegalVetoPeriod, "extendLegalVeto"],
+  ] as const)(
+    "simulate the open %s from the ZK Foundation's Safe, at the head, for a page",
+    async (key, upgradeState, fn) => {
+      state.upgrade = { state: upgradeState, status: [100, 0, false, false, false] };
+      release();
+      const loading = await loadStandardUpgrade(ID, { freshness: "page" });
+      const { steps } = await loading.zkFoundation;
+      const open = steps.find((step) => step.key === key);
+      expect(open).toMatchObject({ state: { status: "open" }, call: call(fn) });
+      expect(open?.simulation).toEqual({ status: "ok" });
+      // The other step is closed and not simulated.
+      expect(steps.find((step) => step.key !== key)).toMatchObject({
+        state: { status: "closed" },
+        simulation: null,
+      });
+      // From the Safe itself (the handler checks msg.sender), and only the open step.
+      expect(state.simulations).toEqual([
+        {
+          request: { from: MAINNET.zkFoundation, to: MAINNET.upgradeHandler, data: call(fn).data },
+          options: { keep: true, page: true },
+        },
+      ]);
+    }
+  );
 });

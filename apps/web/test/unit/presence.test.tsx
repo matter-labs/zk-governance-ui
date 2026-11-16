@@ -469,18 +469,18 @@ describe("a list fed by Safe (ListFreshnessNote)", () => {
     vi.stubGlobal("fetch", up.fetch);
     const revalidate = vi.fn();
     router.revalidate = revalidate;
-    loaderData.matches = [{ data: { watch: [{ key: "list:vetoes", rev: "4" }] } }];
+    loaderData.matches = [{ data: { watch: [{ key: "list:freeze", rev: "4" }] } }];
     const loadedAt = new Date(START - 10 * 60_000).toISOString();
     render(
       <PresenceProvider awayMs={0}>
-        <ListFreshnessNote watchKey="list:vetoes" set={{ safeFetchedAt: loadedAt }} />
+        <ListFreshnessNote watchKey="list:freeze" set={{ safeFetchedAt: loadedAt }} />
       </PresenceProvider>
     );
     // Before a beat answered: the age of the copies the page loaded with.
     expect(screen.getByTestId("set-freshness")).toHaveTextContent("Safe copies from 10m ago");
     up.state.answer = {
       checked: {
-        "list:vetoes": {
+        "list:freeze": {
           state: "watching",
           checkedAt: new Date(START - 20_000).toISOString(),
           nextAt: new Date(START + 280_000).toISOString(),
@@ -545,21 +545,21 @@ describe("Check Safe now on a list: the label says the check at once", () => {
     });
     const fetch = vi.fn(async (url: unknown, init?: RequestInit) =>
       String(url).endsWith("/resources/safe-check")
-        ? Response.json({ key: "list:vetoes", rev: "4", checked: 3, failed: 0, check: check(0) })
+        ? Response.json({ key: "list:freeze", rev: "4", checked: 3, failed: 0, check: check(0) })
         : up.fetch(url as string, init)
     );
     vi.stubGlobal("fetch", fetch);
-    loaderData.matches = [{ data: { watch: [{ key: "list:vetoes", rev: "4" }] } }];
-    up.state.answer = { checked: { "list:vetoes": check(90_000) } };
+    loaderData.matches = [{ data: { watch: [{ key: "list:freeze", rev: "4" }] } }];
+    up.state.answer = { checked: { "list:freeze": check(90_000) } };
     let press: (() => Promise<void>) | null = null;
     function Press() {
-      press = useSafeCheck("list:vetoes").run;
+      press = useSafeCheck("list:freeze").run;
       return null;
     }
     render(
       <PresenceProvider awayMs={0}>
         <Press />
-        <ListFreshnessNote watchKey="list:vetoes" set={{}} />
+        <ListFreshnessNote watchKey="list:freeze" set={{}} />
       </PresenceProvider>
     );
     await act(() => vi.advanceTimersByTimeAsync(300));

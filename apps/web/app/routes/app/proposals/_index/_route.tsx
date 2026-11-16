@@ -299,7 +299,7 @@ function UpgradeRows({
             </span>
             <span className="flex flex-wrap items-center gap-1.5">
               {u.approvedBySecurityCouncil && <Flag label="Security Council" />}
-              {u.approvedByGuardians && <Flag label="Guardians" />}
+              {u.approvedByZkFoundation && <Flag label="ZK Foundation" />}
               {u.legalVetoExtended && <Badge variant="navy">Veto extended</Badge>}
             </span>
             <UpgradeStateBadge state={u.state} />

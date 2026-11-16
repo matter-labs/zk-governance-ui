@@ -28,8 +28,6 @@ const server = {
   UPGRADE_HANDLER_ADDRESS: addressSchema.optional(),
   SAFE_TX_SERVICE_URL: z.string().url().optional(),
   ZK_PROTOCOL_GOVERNOR_ADDRESS: addressSchema.optional(),
-  ZK_TOKEN_GOVERNOR_ADDRESS: addressSchema.optional(),
-  ZK_GOV_OPS_GOVERNOR_ADDRESS: addressSchema.optional(),
   // "window": follow the head only while the app is in use (never for /api/*); "off": never.
   SYNC_MODE: z.enum(["window", "off"]).default("window"),
   SYNC_KEEPWARM_MS: z.coerce.number().int().min(0).default(30_000),

@@ -2,7 +2,6 @@ import { clearCache, peek, remainingMs } from "@/.server/cache";
 import { overrideCodePinsForTests } from "@/.server/chain/pins";
 import { resetVerdicts } from "@/.server/chain/verdicts";
 import { type FreezeParams, loadFreezeRequest } from "@/.server/flows/freeze";
-import { type VetoParams, vetoState } from "@/.server/flows/l2-veto";
 import { getStandardUpgradeCore, listStandardUpgrades } from "@/.server/flows/standard";
 import {
   GOVERNANCE_KEY,
@@ -55,7 +54,7 @@ import {
 const VERDICTS = new Set(["checkSignatures", "isValidSignature", "signedMessages"]);
 const GOVERNANCE_GETTERS = new Set([
   "securityCouncil",
-  "guardians",
+  "zkFoundation",
   "emergencyUpgradeBoard",
   "protocolFrozenUntil",
   "lastFreezeStatusInUpgradeCycle",
@@ -63,7 +62,6 @@ const GOVERNANCE_GETTERS = new Set([
   "eip712Domain",
   "EIP1271_THRESHOLD",
   "softFreezeThreshold",
-  "nonce",
 ]);
 
 beforeEach(() => {
@@ -197,9 +195,9 @@ describe("C-1: two executed detail pages on screen, 200 quiet blocks", () => {
     expect(average("polls") + average("logs") + average("aggregatesAtHead")).toBeLessThan(5.3);
     // Every set on screen was verified at every head, its positives from the aggregate.
     expect(signatureSetsStatus()).toMatchObject({
-      onScreen: 6,
+      onScreen: 3,
       perBlock: { reasked: 0, direct: 0 },
-      lastRecompute: { sets: 6, failed: 0 },
+      lastRecompute: { sets: 3, failed: 0 },
     });
     expect(signatureSetsStatus().perBlock?.fast).toBeGreaterThan(0);
     expect(snapshotStatus()).toMatchObject({ governance: "split", unknown: [] });
@@ -293,27 +291,6 @@ describe("governance at each head, for pages", () => {
     );
   });
 
-  it("S-4: a Guardians veto (its nonce moves, no log at the Guardians) is seen at the first head after it", async () => {
-    let change = Number.POSITIVE_INFINITY as unknown as bigint;
-    const w = liveWorld({ answer: fromBlock("nonce", () => change, 1n) });
-    await following(w);
-    const params: VetoParams = {
-      l2ProposalId: "1",
-      l2GovernorAddress: L1.guardians,
-      l2GasLimit: "1",
-      l2GasPerPubdataByteLimit: "800",
-      refundRecipient: L1.guardians,
-      txMintValue: "0",
-      nonce: "0",
-    };
-    expect(vetoState(await settle(pageGovernance()), params, null)).toEqual({ status: "open" });
-    change = w.head() + 1n;
-    await block(w);
-    const gov = await settle(pageGovernance());
-    expect(gov.guardians.nonce).toBe("1");
-    expect(vetoState(gov, params, null)).toMatchObject({ status: "done" });
-  });
-
   it("another Security Council named by the handler: a full read at the head, the new contract from then on", async () => {
     const NEW_SC = getAddress("0x5c00000000000000000000000000000000000001");
     let change = Number.POSITIVE_INFINITY as unknown as bigint;
@@ -364,7 +341,6 @@ describe("governance at each head, for pages", () => {
       ...FAKE_PINS,
       next: {
         securityCouncil: keccak256(NEXT_CODE),
-        guardians: FAKE_PINS.guardians,
         emergencyUpgradeBoard: FAKE_PINS.emergencyUpgradeBoard,
       },
     });
@@ -421,8 +397,8 @@ describe("governance at each head, for pages", () => {
     expect(await settle(governanceSplitApplies())).toBe(false);
     await vi.advanceTimersByTimeAsync(1_500);
     expect(await settle(governanceSplitApplies())).toBe(true);
-    // The Security Council's, the Guardians' and the Emergency Upgrade Board's code, once.
-    expect(codeReads()).toBe(before + 3);
+    // The Security Council's and the Emergency Upgrade Board's code, once.
+    expect(codeReads()).toBe(before + 2);
   });
 
   it("code that is not the pinned code: pages read governance as JSON does, and the engine keeps it fresh as before", async () => {
@@ -519,7 +495,7 @@ describe("the snapshot: read at each head, nothing carried", () => {
       .verifiedAtBlock;
     failAt = numberToHex(w.head() + 1n);
     await block(w);
-    expect(signatureSetsStatus().lastRecompute).toMatchObject({ failed: 6, verified: 0 });
+    expect(signatureSetsStatus().lastRecompute).toMatchObject({ failed: 3, verified: 0 });
     // A request at that head verifies on its own, and fails (an upstream error, never a verdict).
     await expect(settle(verifySignatureSet(w.sets[0] as SignatureSetParams))).rejects.toThrow();
     // The next head reads again, and the set is what it was.
@@ -588,7 +564,7 @@ describe("the snapshot: read at each head, nothing carried", () => {
     expect(snapshotStatus()).toMatchObject({ block: head.toString(), governance: "full-read" });
     expect(snapshotStatus()?.guard.failures).toBeGreaterThan(0);
     // Every set's verdict there was asked directly instead (no positive from that aggregate).
-    expect(signatureSetsStatus().perBlock).toMatchObject({ fast: 0, reasked: 14 });
+    expect(signatureSetsStatus().perBlock).toMatchObject({ fast: 0, reasked: 8 });
     wrong = null;
     const from = mark(w);
     const gov = await settle(pageGovernance());
@@ -608,19 +584,19 @@ describe("the snapshot: read at each head, nothing carried", () => {
 
 describe("sets verified by the engine from Safe copies older than 60 s", () => {
   /**
-   * The engine verifies the six (closed) sets from the copies held, then JSON asks for the
+   * The engine verifies the three (closed) sets from the copies held, then JSON asks for the
    * council's approval set and emergency set (the same member Safes, the same head).
    */
-  async function jsonAfterHeldPrecompute(w: LiveWorld, verified = 6) {
+  async function jsonAfterHeldPrecompute(w: LiveWorld, verified = 3) {
     showPages(w);
     const head = await settle(latestBlock());
     const before = w.safeRequests.length;
     const run = await settle(precomputeSignatureSets(head));
     // From the copies held, whatever their age (never the last run's): no Safe request.
-    expect(run).toMatchObject({ sets: 6, verified, skipped: 6 - verified, failed: 0 });
+    expect(run).toMatchObject({ sets: 3, verified, skipped: 3 - verified, failed: 0 });
     expect(w.safeRequests.length).toBe(before);
     const approval = await settle(verifySignatureSet(w.sets[0] as SignatureSetParams));
-    const emergency = await settle(verifySignatureSet(w.sets[3] as SignatureSetParams));
+    const emergency = await settle(verifySignatureSet(w.sets[1] as SignatureSetParams));
     return { approval, emergency };
   }
 
@@ -638,13 +614,13 @@ describe("sets verified by the engine from Safe copies older than 60 s", () => {
     // A page's result for a set the engine verified that way (one that can no longer be signed):
     // current at the head, from the copies held, labelled with their age; no Safe request.
     const before = w.safeRequests.length;
-    const page = await settle(verifyPageSignatureSet(w.sets[4] as SignatureSetParams));
+    const page = await settle(verifyPageSignatureSet(w.sets[2] as SignatureSetParams));
     expect(page.stale).toBe(false);
     expect(Date.now() - Date.parse(page.safeFetchedAt ?? "")).toBeGreaterThan(60_000);
     expect(w.safeRequests.length).toBe(before);
     // Its first answer is that result itself.
     const first = await settle(
-      firstSignatureSet(w.sets[4] as SignatureSetParams, Promise.resolve(page))
+      firstSignatureSet(w.sets[2] as SignatureSetParams, Promise.resolve(page))
     );
     expect(first).toBe(page);
   });
@@ -653,7 +629,7 @@ describe("sets verified by the engine from Safe copies older than 60 s", () => {
     const w = liveWorld();
     await backfilled();
     const approval = w.sets[0] as SignatureSetParams;
-    const emergency = w.sets[3] as SignatureSetParams;
+    const emergency = w.sets[1] as SignatureSetParams;
     // The council's member Safes read once; 50 s later the emergency set (the same Safes) is
     // verified from those copies, still within 60 s, and kept.
     await settle(verifySignatureSet(approval));

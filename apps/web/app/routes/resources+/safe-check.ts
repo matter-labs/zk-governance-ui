@@ -1,7 +1,6 @@
-import { emergencyListContent, freezeListContent, vetoListContent } from "@/.server/sync/content";
+import { emergencyListContent, freezeListContent } from "@/.server/sync/content";
 import { heldEmergencyList } from "@/.server/flows/emergency";
 import { heldFreezeList } from "@/.server/flows/freeze";
-import { heldVetoList } from "@/.server/flows/l2-veto";
 import { pageGovernance } from "@/.server/page-governance";
 import { readBodyAtMost } from "@/.server/request";
 import { latestBlock } from "@/.server/rpc";
@@ -28,7 +27,7 @@ export type SafeCheckAnswer = {
 
 const NO_STORE = { "Cache-Control": "no-store" };
 const MAX_BODY = 1_024;
-const KEY = /^(?:set:[0-9a-f]{32}|list:emergency(?::all)?|list:freeze|list:vetoes)$/;
+const KEY = /^(?:set:[0-9a-f]{32}|list:emergency(?::all)?|list:freeze)$/;
 
 const refuse = (status: number, error: string) => json({ error }, { status, headers: NO_STORE });
 
@@ -76,14 +75,8 @@ async function checkNow(key: string): Promise<SafeCheckAnswer | null> {
   }
   const gov = await pageGovernance();
   const safes: Address[] = key.startsWith("list:emergency")
-    ? [
-        ...gov.securityCouncil.members,
-        ...gov.guardians.members,
-        gov.emergencyUpgradeBoard.zkFoundation,
-      ]
-    : key === "list:freeze"
-      ? gov.securityCouncil.members
-      : gov.guardians.members;
+    ? [...gov.securityCouncil.members, gov.emergencyUpgradeBoard.zkFoundation]
+    : gov.securityCouncil.members;
   const { checked, failed } = await checkSafesNow(safes);
   const at = { head: (await latestBlock()).number };
   let rev = currentRev(key);
@@ -96,13 +89,9 @@ async function checkNow(key: string): Promise<SafeCheckAnswer | null> {
         readAt(at, list.governance),
         emergencyListContent(list.pending, list.executed)
       ).rev;
-  } else if (key === "list:freeze") {
+  } else {
     const list = await heldFreezeList();
     if (list) rev = noteContent(key, readAt(at, list.governance), freezeListContent(list)).rev;
-  } else {
-    const list = await heldVetoList();
-    if (list && list.vetoable.l2Error === null)
-      rev = noteContent(key, at, vetoListContent(list.signed, list.vetoable)).rev;
   }
   return { key, rev, checked, failed: failed.length, check: listSafeChecks([key])[key] ?? null };
 }

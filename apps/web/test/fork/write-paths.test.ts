@@ -1,12 +1,11 @@
 import { clearCache } from "@/.server/cache";
 import { getEmergencyUpgrade } from "@/.server/flows/emergency";
 import { getFreezeRequest } from "@/.server/flows/freeze";
-import { getL2Veto } from "@/.server/flows/l2-veto";
 import { getStandardUpgrade } from "@/.server/flows/standard";
-import { governance } from "@/.server/governance";
+import { UnsupportedHandlerError, governance } from "@/.server/governance";
 import { simulate } from "@/.server/signatures";
-import { guardiansAbi, safeAbi } from "@/common/abis";
-import { cancelL2Execution, emergencyExecution } from "@/common/execution";
+import { safeAbi } from "@/common/abis";
+import { emergencyExecution } from "@/common/execution";
 import { upgradeProposalId } from "@/common/proposal";
 import { safeMessageHashes } from "@/common/safe";
 import { type ActionName, buildTypedData, governanceHashes } from "@/common/typed-data";
@@ -24,21 +23,36 @@ import {
   zeroAddress,
 } from "viem";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { UPGRADE_ID } from "../support/fixtures";
-import { TEST_OWNER, signAsSafeOwner, startFork } from "../support/fork";
+import { TEST_OWNER, ZIP19, signAsSafeOwner, startFork } from "../support/fork";
 import { type MockSafe, startMockSafe } from "../support/mock-safe";
 
-// Every write path, against the real deployed governance contracts and member Safes on a fork.
-// Nothing touches mainnet: the fork is local and Safe is a local mock.
+// Every write path, against the real deployed governance contracts and member Safes on a fork, with
+// the handler as it is after ZIP-19 (the Guardians dissolved: the ZK Foundation's Safe approves and
+// extends the legal veto itself, and the Emergency Upgrade Board takes two signers' groups). Nothing
+// touches mainnet: the fork is local and Safe is a local mock.
 
 let fork: Awaited<ReturnType<typeof startFork>>;
 let safeApi: MockSafe;
 let clean: Hex;
+/** governance() on the fork before ZIP-19 is applied: the handler from before it. */
+let beforeZip19: unknown;
 const sender: Address = getAddress("0x00000000000000000000000000000000000c0ffe");
+const LEGAL_VETO = 3 * 86_400;
 
 beforeAll(async () => {
   fork = await startFork({ port: 18545 });
   safeApi = await startMockSafe({ port: 18546 });
+  beforeZip19 = await governance().catch((error: unknown) => error);
+  await fork.applyZip19();
+  // A freeze touches every chain and bridge: their state is fetched once here, not under the
+  // app's per-call time limit in the tests.
+  const gov = await governance();
+  await fork.prefetch(
+    gov.securityCouncil.address,
+    gov.upgradeHandler,
+    encodeFunctionData({ abi: parseAbi(["function softFreeze()"]), functionName: "softFreeze" })
+  );
+  clearCache();
   clean = await fork.snapshot();
 });
 
@@ -105,15 +119,41 @@ async function approveOnChain(safe: Address, digest: Hex) {
   expect(receipt.status).toBe("success");
 }
 
-describe("on a mainnet fork", () => {
-  it("approves upgrade 0x77d5… with the Security Council's real Safe signatures", async () => {
-    const before = await getStandardUpgrade(UPGRADE_ID);
-    expect(before.state).toBe(2); // Waiting
-    const council = before.sets.find((s) => s.key === "securityCouncil");
-    expect(council?.state.status).toBe("open");
-    expect(council?.set.valid).toHaveLength(7);
-    expect(council?.execution?.simulation.status).toBe("ok");
+describe("on a mainnet fork, after ZIP-19", () => {
+  it("reports the handler from before ZIP-19 as one this build does not show", () => {
+    expect(beforeZip19).toBeInstanceOf(UnsupportedHandlerError);
+    expect((beforeZip19 as Error).message).toMatch(/before ZIP-19/);
+  });
 
+  it("reads the Security Council, the ZK Foundation's Safe and the two-party board", async () => {
+    const gov = await governance();
+    expect(gov.zkFoundation).toBe(ZIP19.zkFoundation);
+    expect(gov.emergencyUpgradeBoard.address).toBe(ZIP19.emergencyUpgradeBoard);
+    expect(gov.emergencyUpgradeBoard.zkFoundation).toBe(ZIP19.zkFoundation);
+    expect(gov.securityCouncil.members.length).toBeGreaterThan(0);
+    expect(gov.warnings).toEqual([]);
+  });
+
+  it("approves ZIP-19's upgrade with the Security Council's Safe signatures", async () => {
+    await fork.warp(LEGAL_VETO);
+    clearCache();
+    const gov = await governance();
+    const before = await getStandardUpgrade(ZIP19.id);
+    expect(before.state).toBe(2); // Waiting
+    expect(before.sets.map((s) => s.key)).toEqual(["securityCouncil"]);
+    await signInSafes(
+      "ApproveUpgradeSecurityCouncil",
+      gov.securityCouncil.domain,
+      { id: ZIP19.id },
+      gov.securityCouncil.members.slice(0, gov.securityCouncil.thresholds.approveUpgrade)
+    );
+
+    clearCache();
+    const signed = await getStandardUpgrade(ZIP19.id);
+    const council = signed.sets.find((s) => s.key === "securityCouncil");
+    expect(council?.state.status).toBe("open");
+    expect(council?.set.valid).toHaveLength(gov.securityCouncil.thresholds.approveUpgrade);
+    expect(council?.execution?.simulation.status).toBe("ok");
     const receipt = await fork.sendAs(
       sender,
       council?.execution?.to as Address,
@@ -122,12 +162,80 @@ describe("on a mainnet fork", () => {
     expect(receipt.status).toBe("success");
 
     clearCache();
-    const after = await getStandardUpgrade(UPGRADE_ID);
+    const after = await getStandardUpgrade(ZIP19.id);
     expect(after.state).toBe(3); // ExecutionPending
     const done = after.sets.find((s) => s.key === "securityCouncil");
     expect(done?.state).toMatchObject({ status: "done", txHash: receipt.transactionHash });
     expect(done?.used?.every((u) => u.matchesSafe)).toBe(true);
     expect(done?.historical?.accepted).toBe(true);
+    // Approved by the Security Council: the ZK Foundation's approval is no longer possible.
+    const approval = after.zkFoundation.steps.find((s) => s.key === "approval");
+    expect(approval?.state.status).toBe("closed");
+  });
+
+  it("the ZK Foundation extends the legal veto from its Safe, and the page shows it done", async () => {
+    const before = await getStandardUpgrade(ZIP19.id);
+    expect(before.state).toBe(1); // LegalVetoPeriod
+    expect(before.zkFoundation.safe).toBe(ZIP19.zkFoundation);
+    const step = before.zkFoundation.steps.find((s) => s.key === "legalVeto");
+    expect(step?.state.status).toBe("open");
+    expect(step?.call).toMatchObject({ to: ZIP19.handler, functionName: "extendLegalVeto" });
+    // Simulated from the Safe itself: the handler checks msg.sender.
+    expect(step?.simulation?.status).toBe("ok");
+    expect(await simulate(step?.call as NonNullable<typeof step>["call"])).toMatchObject({
+      status: "reverted",
+    });
+    expect(before.zkFoundation.steps.find((s) => s.key === "approval")?.state.status).toBe(
+      "closed"
+    );
+
+    const receipt = await fork.sendAs(
+      ZIP19.zkFoundation,
+      step?.call.to as Address,
+      step?.call.data as Hex
+    );
+    expect(receipt.status).toBe("success");
+
+    clearCache();
+    const after = await getStandardUpgrade(ZIP19.id);
+    expect(after.status.zkFoundationExtendedLegalVeto).toBe(true);
+    expect(after.timeline.legalVetoEndsAt).toBe(ZIP19.createdAt + 7 * 86_400);
+    const done = after.zkFoundation.steps.find((s) => s.key === "legalVeto");
+    expect(done?.state).toMatchObject({ status: "done", txHash: receipt.transactionHash });
+    expect(done?.simulation).toBeNull();
+  });
+
+  it("the ZK Foundation approves from its Safe once the legal veto ended", async () => {
+    await fork.warp(LEGAL_VETO);
+    clearCache();
+    const before = await getStandardUpgrade(ZIP19.id);
+    expect(before.state).toBe(2); // Waiting
+    const step = before.zkFoundation.steps.find((s) => s.key === "approval");
+    expect(step?.state.status).toBe("open");
+    expect(step?.call).toMatchObject({
+      to: ZIP19.handler,
+      functionName: "approveUpgradeZkFoundation",
+    });
+    expect(step?.simulation?.status).toBe("ok");
+
+    const receipt = await fork.sendAs(
+      ZIP19.zkFoundation,
+      step?.call.to as Address,
+      step?.call.data as Hex
+    );
+    expect(receipt.status).toBe("success");
+
+    clearCache();
+    const after = await getStandardUpgrade(ZIP19.id);
+    expect(after.status.zkFoundationApproval).toBe(true);
+    // Ready a day after the 30-day waiting period that follows the legal veto.
+    expect(after.timeline.readyAt).toBe(ZIP19.createdAt + LEGAL_VETO + 30 * 86_400 + 86_400);
+    expect(after.zkFoundation.steps.find((s) => s.key === "approval")?.state).toMatchObject({
+      status: "done",
+      txHash: receipt.transactionHash,
+    });
+    // The Security Council can still approve (and make it ready sooner).
+    expect(after.sets.find((s) => s.key === "securityCouncil")?.state.status).toBe("open");
   });
 
   it("collects a soft freeze in three member Safes and executes it", async () => {
@@ -136,11 +244,12 @@ describe("on a mainnet fork", () => {
     await signInSafes(
       "SoftFreeze",
       gov.securityCouncil.domain,
-      { nonce: "0", validUntil },
-      gov.securityCouncil.members.slice(0, 3)
+      { nonce: gov.securityCouncil.nonces.softFreeze, validUntil },
+      gov.securityCouncil.members.slice(0, gov.securityCouncil.thresholds.softFreeze)
     );
 
-    const request = await getFreezeRequest({ action: "SoftFreeze", nonce: "0", validUntil });
+    const nonce = gov.securityCouncil.nonces.softFreeze;
+    const request = await getFreezeRequest({ action: "SoftFreeze", nonce, validUntil });
     expect(request.set.threshold).toBe(gov.securityCouncil.thresholds.softFreeze);
     expect(request.set.thresholdCheck.status).toBe("met");
     expect(request.execution?.simulation.status).toBe("ok");
@@ -151,12 +260,12 @@ describe("on a mainnet fork", () => {
 
     clearCache();
     expect((await governance()).freeze.lastFreezeStatus).toBe(1); // Soft
-    expect(
-      (await getFreezeRequest({ action: "SoftFreeze", nonce: "0", validUntil })).state.status
-    ).toBe("done");
+    expect((await getFreezeRequest({ action: "SoftFreeze", nonce, validUntil })).state.status).toBe(
+      "done"
+    );
   });
 
-  it("executes an emergency upgrade from a payload, then rebuilds that payload from the execution", async () => {
+  it("executes an emergency upgrade through the two-party board from a payload, then rebuilds it", async () => {
     const gov = await governance();
     const board = gov.emergencyUpgradeBoard;
     const proposal = {
@@ -172,21 +281,19 @@ describe("on a mainnet fork", () => {
     };
     const id = upgradeProposalId(proposal);
     const council = gov.securityCouncil.members.slice(0, gov.securityCouncil.eip1271Threshold);
-    const guardians = gov.guardians.members.slice(0, gov.guardians.eip1271Threshold);
     await signInSafes("ExecuteEmergencyUpgradeSecurityCouncil", board.domain, { id }, council);
-    await signInSafes("ExecuteEmergencyUpgradeGuardians", board.domain, { id }, guardians);
     await signInSafes("ExecuteEmergencyUpgradeZKFoundation", board.domain, { id }, [
       board.zkFoundation,
     ]);
 
     const pending = await getEmergencyUpgrade(id);
     expect(pending.state).toBe(0);
-    expect(pending.roles.map((r) => r.set.thresholdCheck.status)).toEqual(["met", "met", "met"]);
+    expect(pending.roles.map((r) => r.key)).toEqual(["securityCouncil", "zkFoundation"]);
+    expect(pending.roles.map((r) => r.set.thresholdCheck.status)).toEqual(["met", "met"]);
     const valid = (key: string) => pending.roles.find((r) => r.key === key)?.set.valid ?? [];
     const execution = emergencyExecution(
       board.address,
       proposal,
-      valid("guardians"),
       valid("securityCouncil"),
       valid("zkFoundation")[0]?.signature as Hex
     );
@@ -197,62 +304,20 @@ describe("on a mainnet fork", () => {
     const executed = await getEmergencyUpgrade(id);
     expect(executed.state).toBe(6);
     expect(executed.executed?.idMatches).toBe(true);
+    expect(executed.executed?.beforeZip19).toBe(false);
     expect(executed.executed?.proposal).toEqual(proposal);
     expect(executed.roles.every((r) => r.used?.every((u) => u.matchesSafe))).toBe(true);
+    expect(executed.executed?.historical?.checks.map((c) => c.role)).toEqual([
+      "Security Council",
+      "ZKsync Foundation",
+    ]);
     expect(executed.executed?.historical?.checks.every((c) => c.accepted)).toBe(true);
-  });
-
-  it("verifies a Guardian veto and sends it to ZKsync Era from L1", async () => {
-    const gov = await governance();
-    const params = {
-      l2ProposalId: "62921954496791164991088292844527972033503604235062526266434445973055965160650",
-      l2GovernorAddress: getAddress("0xb83FF6501214ddF40C91C9565d095400f3F45746"),
-      l2GasLimit: "30000000",
-      l2GasPerPubdataByteLimit: "800",
-      refundRecipient: sender,
-      txMintValue: "20000000000000000",
-      nonce: gov.guardians.nonce,
-    };
-    await signInSafes(
-      "CancelL2GovernorProposal",
-      gov.guardians.domain,
-      params,
-      gov.guardians.members.slice(0, gov.guardians.thresholds.cancelL2Proposal)
-    );
-
-    const veto = await getL2Veto(params);
-    expect(veto.set.thresholdCheck.status).toBe("met");
-    expect(veto.l2Proposal?.idMatchesLocal).toBe(true);
-    // This rehearsal proposal is already cancelled on L2, so the app does not offer to send it…
-    expect(veto.state).toMatchObject({ status: "closed" });
-    // …but the L1 side the app builds is accepted by Guardians.
-    const execution = cancelL2Execution(
-      gov.guardians.address,
-      veto.l2Proposal as NonNullable<typeof veto.l2Proposal>,
-      {
-        to: params.l2GovernorAddress,
-        l2GasLimit: params.l2GasLimit,
-        l2GasPerPubdataByteLimit: params.l2GasPerPubdataByteLimit,
-        refundRecipient: params.refundRecipient,
-        txMintValue: params.txMintValue,
-      },
-      veto.set.valid
-    );
-    expect(
-      (await fork.sendAs(sender, execution.to, execution.data, BigInt(execution.value))).status
-    ).toBe("success");
-    const nonce = await fork.publicClient.readContract({
-      address: gov.guardians.address,
-      abi: guardiansAbi,
-      functionName: "nonce",
-    });
-    expect(nonce).toBe(BigInt(params.nonce) + 1n);
   });
 
   it("with Safe's API down, executes a soft freeze its member Safes approved on-chain", async () => {
     const gov = await governance();
     const validUntil = String(BigInt(gov.latestBlock.timestamp) + 7n * 86_400n);
-    const message = { nonce: "0", validUntil };
+    const message = { nonce: gov.securityCouncil.nonces.softFreeze, validUntil };
     const { digest } = governanceHashes(
       buildTypedData("SoftFreeze", gov.securityCouncil.domain, message)
     );
@@ -279,7 +344,7 @@ describe("on a mainnet fork", () => {
     expect((await governance()).freeze.lastFreezeStatus).toBe(1); // Soft
   });
 
-  it("with Safe's API down, executes an emergency upgrade every group approved on-chain", async () => {
+  it("with Safe's API down, executes an emergency upgrade both groups approved on-chain", async () => {
     const gov = await governance();
     const board = gov.emergencyUpgradeBoard;
     const proposal = {
@@ -302,16 +367,12 @@ describe("on a mainnet fork", () => {
       "ExecuteEmergencyUpgradeSecurityCouncil",
       gov.securityCouncil.members.slice(0, gov.securityCouncil.eip1271Threshold)
     );
-    await approve(
-      "ExecuteEmergencyUpgradeGuardians",
-      gov.guardians.members.slice(0, gov.guardians.eip1271Threshold)
-    );
     await approve("ExecuteEmergencyUpgradeZKFoundation", [board.zkFoundation]);
 
     safeApi.failWith(503);
     clearCache();
     const pending = await getEmergencyUpgrade(id);
-    expect(pending.roles.map((r) => r.set.thresholdCheck.status)).toEqual(["met", "met", "met"]);
+    expect(pending.roles.map((r) => r.set.thresholdCheck.status)).toEqual(["met", "met"]);
     for (const role of pending.roles) {
       expect(role.set.safeApiError).toMatch(/503/);
       const valid = role.set.members.filter((m) => m.status === "valid");
@@ -323,7 +384,6 @@ describe("on a mainnet fork", () => {
     const execution = emergencyExecution(
       board.address,
       proposal,
-      valid("guardians"),
       valid("securityCouncil"),
       valid("zkFoundation")[0]?.signature as Hex
     );
@@ -334,6 +394,8 @@ describe("on a mainnet fork", () => {
   });
 
   it("still counts on-chain approvals and supplied signatures when Safe's API is down", async () => {
+    await fork.warp(LEGAL_VETO);
+    clearCache();
     const gov = await governance();
     const [onchainMember, suppliedMember, strangerSafe] = gov.securityCouncil.members as [
       Address,
@@ -341,7 +403,7 @@ describe("on a mainnet fork", () => {
       Address,
     ];
     const typedData = buildTypedData("ApproveUpgradeSecurityCouncil", gov.securityCouncil.domain, {
-      id: UPGRADE_ID,
+      id: ZIP19.id,
     });
     const { digest } = governanceHashes(typedData);
     // A Safe approving a message on-chain sets signedMessages[safeMessageHash] (storage slot 7 in v1.3.0).
@@ -361,7 +423,7 @@ describe("on a mainnet fork", () => {
     await fork.takeOver(suppliedMember);
 
     safeApi.failWith(503);
-    const detail = await getStandardUpgrade(UPGRADE_ID, {
+    const detail = await getStandardUpgrade(ZIP19.id, {
       supplied: [
         { signer: suppliedMember, signature: await signAsSafeOwner(suppliedMember, digest) },
         // A Safe the test key does not own: the contract rejects it.

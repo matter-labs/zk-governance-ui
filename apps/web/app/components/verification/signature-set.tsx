@@ -39,10 +39,11 @@ import { useAccount } from "wagmi";
 type Serialized<T> = SerializeFrom<T>;
 
 // The approvals of an action as one table, like its calls: a row per signer group (the Security
-// Council, the Guardians, the Foundation) with its state, count and result, unfolding into how it
-// was verified, its members and what they sign. Open groups start unfolded unless the page folds
-// them all (an emergency upgrade's three); Expand all and Typed data (every group's EIP-712 data)
-// are in the header. A group's folded content stays rendered.
+// Council, the ZK Foundation) with its state, count and result, unfolding into how it was verified,
+// its members and what they sign. A standard upgrade's ZK Foundation steps, Safe transactions with
+// no signatures of their own, are rows of the same table (zk-foundation-steps.tsx). Open groups start unfolded unless the page folds them all (an
+// emergency upgrade's two); Expand all and Typed data (every group's EIP-712 data) are in the
+// header. A group's folded content stays rendered.
 
 type Groups = {
   fold: { open: boolean; v: number };
@@ -53,8 +54,20 @@ type Groups = {
 };
 const GroupsContext = createContext<Groups | null>(null);
 
+const NO_GROUPS: Groups = {
+  fold: { open: false, v: 0 },
+  typed: false,
+  unfoldOpen: true,
+  hideClosed: false,
+};
+
+/** The table's view (Expand all, Typed data, closed groups folded away), for a row in it. */
+export function useGroups(): Groups {
+  return useContext(GroupsContext) ?? NO_GROUPS;
+}
+
 /** Column widths shared by the header and every group row (from md up). */
-const GROUP_COLUMNS = "md:grid-cols-[minmax(0,1.4fr)_196px_minmax(0,1.1fr)_20px] md:gap-x-4";
+export const GROUP_COLUMNS = "md:grid-cols-[minmax(0,1.4fr)_196px_minmax(0,1.1fr)_20px] md:gap-x-4";
 
 export function ApprovalGroups({
   count,
@@ -189,12 +202,7 @@ function GroupRow({
   // The engine verifies a watched set again at each new block; the page reloads when it changed.
   useWatchItem(set.watch);
   const live = useLive();
-  const groups = useContext(GroupsContext) ?? {
-    fold: { open: false, v: 0 },
-    typed: false,
-    unfoldOpen: true,
-    hideClosed: false,
-  };
+  const groups = useGroups();
   const closed = state.status === "closed";
   const { fold } = groups;
   // Open to sign: unfolded at first (unless the page folds them); done or closed: folded. Expand /
@@ -424,6 +432,42 @@ function GroupRow({
   );
 }
 
+/** The Result cell's text style, shared by every row of the table. */
+export const RESULT_TONE = "inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[14px]";
+
+/** A done step's Result: the transaction that made it and when, or that it is recorded. */
+export function RecordedOnChain({
+  state,
+  stale,
+}: {
+  state: Extract<Serialized<SetState>, { status: "done" }>;
+  stale: boolean;
+}) {
+  const explorer = useExplorer();
+  return (
+    <>
+      <span
+        className={cn(RESULT_TONE, stale ? "text-slate-700" : "text-green-900")}
+        title={state.txHash ?? undefined}
+      >
+        <CheckCircle2 aria-hidden className="h-4 w-4 shrink-0" />
+        {state.txHash ? (
+          <>
+            In{" "}
+            <ExternalAnchor href={explorer.tx(state.txHash)} className="mono text-[13px]">
+              {shortHex(state.txHash, 10, 8)}
+            </ExternalAnchor>
+            <CopyButton value={state.txHash} label="Copy transaction hash" />
+          </>
+        ) : (
+          "Recorded on-chain"
+        )}
+      </span>
+      {state.txHash && <ExecutedOn at={state.at} />}
+    </>
+  );
+}
+
 /** The Result cell: how the group stands, in a word or two (its unfolded part says it in full). */
 function GroupResult({
   set,
@@ -440,9 +484,8 @@ function GroupResult({
   used?: Serialized<UsedSignature>[] | null;
   historical?: { block: string; accepted: boolean | null; error: string | null } | null;
 }) {
-  const explorer = useExplorer();
   const check = set.thresholdCheck;
-  const tone = "inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[14px]";
+  const tone = RESULT_TONE;
   if (state.status === "done") {
     // Done on-chain: the transaction is the evidence, whatever Safe's copies count today. Under it
     // only what would be a problem: a re-check the contract rejected, or signatures that differ
@@ -450,24 +493,7 @@ function GroupResult({
     const differ = used?.some((u) => u.matchesSafe === false) ?? false;
     return (
       <span className="block space-y-0.5" data-testid="done-summary">
-        <span
-          className={cn(tone, staleAt === null ? "text-green-900" : "text-slate-700")}
-          title={state.txHash ?? undefined}
-        >
-          <CheckCircle2 aria-hidden className="h-4 w-4 shrink-0" />
-          {state.txHash ? (
-            <>
-              In{" "}
-              <ExternalAnchor href={explorer.tx(state.txHash)} className="mono text-[13px]">
-                {shortHex(state.txHash, 10, 8)}
-              </ExternalAnchor>
-              <CopyButton value={state.txHash} label="Copy transaction hash" />
-            </>
-          ) : (
-            "Recorded on-chain"
-          )}
-        </span>
-        {state.txHash && <ExecutedOn at={state.at} />}
+        <RecordedOnChain state={state} stale={staleAt !== null} />
         {historical?.accepted === false && (
           <span className="block text-[12.5px] text-red-900">
             Re-check at #{formatNumber(historical.block)} rejected ({historical.error})

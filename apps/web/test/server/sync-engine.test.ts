@@ -47,7 +47,6 @@ import { type ChainLog, PUH_TOPICS, blockHash, puhHistory } from "../support/fak
 import { FakeRpcError } from "../support/fake-jsonrpc";
 import {
   type FakeL1Options,
-  G_MEMBERS,
   L1,
   SC_MEMBERS,
   type UpgradeOnChain,
@@ -1109,10 +1108,9 @@ describe("live engine", () => {
   it("seeds head, governance, upgrade states and the on-screen sets' Safe info: 100 request-path rounds ask nothing upstream", async () => {
     const { fake, ids } = liveChain();
     await backfilled();
-    // The council's, the Guardians' and the ZK Foundation's sets on screen.
+    // The council's and the ZK Foundation's sets on screen.
     showOnScreen([
       setOf("securityCouncil", SC_MEMBERS, L1.securityCouncil),
-      setOf("guardians", G_MEMBERS, L1.guardians),
       setOf("zkFoundation", [L1.zkFoundation], L1.zkFoundation),
     ]);
     const engine = liveEngine();
@@ -1130,7 +1128,7 @@ describe("live engine", () => {
     expect(statusCalls(fake, HEAD).every((c) => c.viaMulticall)).toBe(true);
 
     const before = fake.posts.length;
-    const safes = [...SC_MEMBERS, ...G_MEMBERS, L1.zkFoundation];
+    const safes = [...SC_MEMBERS, L1.zkFoundation];
     for (let round = 0; round < 100; round++) {
       const [head, boundary, gov, statuses, , list, core] = await Promise.all([
         latestBlock(),
@@ -1193,11 +1191,7 @@ describe("live engine", () => {
   });
 
   it("serves a tick's governance for 30 s from the read's answer, however late its head is served", async () => {
-    const governanceContracts = new Set<string>([
-      L1.securityCouncil,
-      L1.guardians,
-      L1.emergencyUpgradeBoard,
-    ]);
+    const governanceContracts = new Set<string>([L1.securityCouncil, L1.emergencyUpgradeBoard]);
     let answered = 0;
     let failGovernance = false;
     const { fake } = liveChain({

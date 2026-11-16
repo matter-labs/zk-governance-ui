@@ -1,6 +1,5 @@
 import {
   emergencyUpgradeBoardAbi,
-  guardiansAbi,
   safeAbi,
   securityCouncilAbi,
   upgradeHandlerAbi,
@@ -18,6 +17,7 @@ import {
   isHex,
   multicall3Abi,
   numberToHex,
+  parseAbi,
   zeroHash,
 } from "viem";
 import { cached, cachedUntil, forget, linkStore } from "./cache";
@@ -77,10 +77,12 @@ export type Governance = {
       setSoftFreezeThreshold: string;
     };
   };
-  guardians: Multisig & {
-    thresholds: { approveUpgrade: number; extendLegalVeto: number; cancelL2Proposal: number };
-    nonce: string;
-  };
+  /**
+   * The ZK Foundation's Safe (ProtocolUpgradeHandler.zkFoundation()): it approves a standard
+   * upgrade and extends its legal veto with its own Safe transaction to the handler, and co-signs
+   * emergency upgrades with the Security Council.
+   */
+  zkFoundation: Address;
   emergencyUpgradeBoard: { address: Address; domain: Eip712Domain; zkFoundation: Address };
   freeze: { protocolFrozenUntil: string; lastFreezeStatus: number };
   latestBlock: { number: string; timestamp: string };
@@ -138,23 +140,20 @@ type DomainAnswer = readonly [string, string, string, bigint, Address, ...unknow
 type Reads = {
   puh: Address;
   sc: Address;
-  g: Address;
+  zkf: Address;
   eub: Address;
   frozenUntil: bigint;
   freezeStatus: number;
   scMembers: Address[];
-  gMembers: Address[];
   scDomain: DomainAnswer;
-  gDomain: DomainAnswer;
   eubDomain: DomainAnswer;
   scValues: readonly unknown[];
-  gValues: readonly unknown[];
   eubValues: readonly unknown[];
 };
 
 const PUH_GETTERS = [
   "securityCouncil",
-  "guardians",
+  "zkFoundation",
   "emergencyUpgradeBoard",
   "protocolFrozenUntil",
   "lastFreezeStatusInUpgradeCycle",
@@ -172,45 +171,36 @@ const SC_GETTERS = [
   "softFreezeThresholdSettingNonce",
   "PROTOCOL_UPGRADE_HANDLER",
 ] as const;
-const G_GETTERS = [
-  "EIP1271_THRESHOLD",
-  "APPROVE_UPGRADE_GUARDIANS_THRESHOLD",
-  "EXTEND_LEGAL_VETO_THRESHOLD",
-  "CANCEL_L2_GOVERNOR_PROPOSAL_THRESHOLD",
-  "nonce",
-  "PROTOCOL_UPGRADE_HANDLER",
-] as const;
-const EUB_GETTERS = [
-  "ZK_FOUNDATION_SAFE",
-  "SECURITY_COUNCIL",
-  "GUARDIANS",
-  "PROTOCOL_UPGRADE_HANDLER",
-] as const;
+const EUB_GETTERS = ["ZK_FOUNDATION_SAFE", "SECURITY_COUNCIL", "PROTOCOL_UPGRADE_HANDLER"] as const;
 
 const noContract = (net: Network) =>
   new Error(`No contract at ProtocolUpgradeHandler ${net.upgradeHandler} on chain ${net.chainId}`);
 
 /**
- * The handler runs code this build cannot show: the one without Guardians (zk-governance #51), where
- * the ZK Foundation approves upgrades, extends the legal veto and co-signs emergencies in their place.
- * Nothing about it is shown rather than shown as the Guardians'.
+ * The handler runs code this build cannot show: the one from before ZIP-19, which still names the
+ * Guardians where this build reads the ZK Foundation (zkFoundation() reverts there). Nothing about
+ * it is shown rather than shown as the ZK Foundation's.
  */
 export class UnsupportedHandlerError extends Error {
   override name = "UnsupportedHandlerError";
 }
 
-// Why a handler getter failed: the handler without Guardians answers zkFoundation() where
-// guardians() reverts. Asked only once a read failed (one eth_call); else the read's own error.
+// Only to tell the handler from before ZIP-19 apart: its getter for the role ZIP-19 hands to the
+// ZK Foundation. Never read otherwise.
+const handlerBeforeZip19Abi = parseAbi(["function guardians() view returns (address)"]);
+
+// Why a handler getter failed: the handler from before ZIP-19 answers guardians() where
+// zkFoundation() reverts. Asked only once a read failed (one eth_call); else the read's own error.
 async function handlerFailure(net: Network, blockNumber: bigint | undefined, reason: unknown) {
-  const zkFoundation = await callFn<Address>({
+  const earlierRole = await callFn<Address>({
     address: net.upgradeHandler,
-    abi: upgradeHandlerAbi,
-    functionName: "zkFoundation",
+    abi: handlerBeforeZip19Abi,
+    functionName: "guardians",
     blockNumber,
   }).catch(() => null);
-  if (!zkFoundation) return reason;
+  if (!earlierRole) return reason;
   return new UnsupportedHandlerError(
-    `The ProtocolUpgradeHandler at ${net.upgradeHandler} was upgraded: it has no Guardians any more (the ZK Foundation ${getAddress(zkFoundation)} acts in their place). This build of the verifier does not support that handler; use one built for it.`
+    `The ProtocolUpgradeHandler at ${net.upgradeHandler} still runs the code from before ZIP-19: it names the Guardians (${getAddress(earlierRole)}), not the ZK Foundation. This build of the verifier supports the handler after ZIP-19 only (Security Council and ZK Foundation); use the previous build until that upgrade is executed on L1.`
   );
 }
 
@@ -226,9 +216,9 @@ async function readInRounds(net: Network, blockNumber: bigint | undefined): Prom
   const failed = puhValues.find((settled) => settled.status === "rejected");
   if (failed?.status === "rejected") throw await handlerFailure(net, blockNumber, failed.reason);
   const values = puhValues.map((settled) => (settled as PromiseFulfilledResult<unknown>).value);
-  const [scAddress, gAddress, eubAddress, frozenUntil, freezeStatus] = values;
+  const [scAddress, zkfAddress, eubAddress, frozenUntil, freezeStatus] = values;
   const sc = getAddress(scAddress as Address);
-  const g = getAddress(gAddress as Address);
+  const zkf = getAddress(zkfAddress as Address);
   const eub = getAddress(eubAddress as Address);
   const domain = (address: Address, abi: Abi) =>
     confirmedRead<DomainAnswer>(address, abi, "eip712Domain", [], blockNumber).catch(
@@ -236,31 +226,24 @@ async function readInRounds(net: Network, blockNumber: bigint | undefined): Prom
     );
   const all = (address: Address, abi: Abi, getters: readonly string[]) =>
     Promise.all(getters.map((fn) => read(address, abi, fn, [], blockNumber)));
-  const [scMembers, gMembers, scDomain, gDomain, eubDomain, scValues, gValues, eubValues] =
-    await Promise.all([
-      readMembers(sc, securityCouncilAbi, blockNumber),
-      readMembers(g, guardiansAbi, blockNumber),
-      domain(sc, securityCouncilAbi),
-      domain(g, guardiansAbi),
-      domain(eub, emergencyUpgradeBoardAbi),
-      all(sc, securityCouncilAbi, SC_GETTERS),
-      all(g, guardiansAbi, G_GETTERS),
-      all(eub, emergencyUpgradeBoardAbi, EUB_GETTERS),
-    ]);
+  const [scMembers, scDomain, eubDomain, scValues, eubValues] = await Promise.all([
+    readMembers(sc, securityCouncilAbi, blockNumber),
+    domain(sc, securityCouncilAbi),
+    domain(eub, emergencyUpgradeBoardAbi),
+    all(sc, securityCouncilAbi, SC_GETTERS),
+    all(eub, emergencyUpgradeBoardAbi, EUB_GETTERS),
+  ]);
   return {
     puh,
     sc,
-    g,
+    zkf,
     eub,
     frozenUntil: frozenUntil as bigint,
     freezeStatus: freezeStatus as number,
     scMembers,
-    gMembers,
     scDomain,
-    gDomain,
     eubDomain,
     scValues,
-    gValues,
     eubValues,
   };
 }
@@ -268,10 +251,9 @@ async function readInRounds(net: Network, blockNumber: bigint | undefined): Prom
 type Layout = {
   puh: Address;
   sc: Address;
-  g: Address;
+  zkf: Address;
   eub: Address;
   scCount: number;
-  gCount: number;
 };
 
 // The last read and its layout (pages reuse its constructor-only part): dropped with governance,
@@ -286,15 +268,16 @@ linkStore("governance-layout", () => {
   layoutEpoch++;
 });
 
-// Whether a full read's three contracts run the pinned code, by address (see pinsChecked).
+// Whether a full read's two contracts run the pinned code, by address (see pinsChecked).
 const pinChecks = new Map<string, { result: boolean | null; started: boolean }>();
 const PIN_CHECK_AFTER_MS = 1_000;
 
 type SubCall = { target: Address; abi: Abi; functionName: string; args?: readonly unknown[] };
 
-// Every read of readInRounds in one POST (four billed requests), guessing the last read's layout.
-// Accepted only if the code is there, every sub-call decodes, the handler named the same three
-// contracts, and both lists' terminators members(count) definitely reverted. null otherwise.
+// Every read of readInRounds in one POST (three billed requests), guessing the last read's layout.
+// Accepted only if the code is there, every sub-call decodes, the handler named the same Security
+// Council, ZK Foundation and board, and the list's terminator members(count) definitely reverted.
+// null otherwise.
 async function readInOne(
   net: Network,
   blockNumber: bigint | undefined,
@@ -313,12 +296,9 @@ async function readInOne(
   const calls: SubCall[] = [
     ...getters(puh, upgradeHandlerAbi, PUH_GETTERS),
     ...members(guess.sc, securityCouncilAbi, guess.scCount),
-    ...members(guess.g, guardiansAbi, guess.gCount),
     { target: guess.sc, abi: securityCouncilAbi, functionName: "eip712Domain" },
-    { target: guess.g, abi: guardiansAbi, functionName: "eip712Domain" },
     { target: guess.eub, abi: emergencyUpgradeBoardAbi, functionName: "eip712Domain" },
     ...getters(guess.sc, securityCouncilAbi, SC_GETTERS),
-    ...getters(guess.g, guardiansAbi, G_GETTERS),
     ...getters(guess.eub, emergencyUpgradeBoardAbi, EUB_GETTERS),
   ];
   const tag = blockNumber === undefined ? "latest" : numberToHex(blockNumber);
@@ -341,11 +321,10 @@ async function readInOne(
   const terminator = (address: Address, abi: Abi, count: number) =>
     callFn<Address>({ address, abi, functionName: "members", args: [BigInt(count)], blockNumber });
   // Sent together: the call lane puts them in one JSON-RPC batch.
-  const [code, answer, scEnd, gEnd] = await Promise.allSettled([
+  const [code, answer, scEnd] = await Promise.allSettled([
     lane.request<unknown>("eth_getCode", [puh, tag]),
     lane.request<unknown>("eth_call", [{ to: MULTICALL3, data: aggregate }, tag]),
     terminator(guess.sc, securityCouncilAbi, guess.scCount),
-    terminator(guess.g, guardiansAbi, guess.gCount),
   ]);
   for (const sent of [code, answer]) {
     if (sent.status === "fulfilled") continue;
@@ -357,11 +336,9 @@ async function readInOne(
   if (code.status !== "fulfilled" || answer.status !== "fulfilled") return null;
   if (typeof code.value !== "string" || !isHex(code.value) || /^0x0*$/.test(code.value))
     return null;
-  // Both lists end exactly where they ended: a definite revert, nothing else.
-  for (const end of [scEnd, gEnd]) {
-    if (end.status === "rejected" && isUnknownBlock(end.reason)) throw end.reason;
-    if (end.status !== "rejected" || classify(end.reason) !== "revert") return null;
-  }
+  // The list ends exactly where it ended: a definite revert, nothing else.
+  if (scEnd.status === "rejected" && isUnknownBlock(scEnd.reason)) throw scEnd.reason;
+  if (scEnd.status !== "rejected" || classify(scEnd.reason) !== "revert") return null;
   if (typeof answer.value !== "string" || !isHex(answer.value)) return null;
   let results: readonly { success: boolean; returnData: Hex }[];
   try {
@@ -396,34 +373,25 @@ async function readInOne(
     at += n;
     return part;
   };
-  const [scAddress, gAddress, eubAddress, frozenUntil, freezeStatus] = take(PUH_GETTERS.length);
+  const [scAddress, zkfAddress, eubAddress, frozenUntil, freezeStatus] = take(PUH_GETTERS.length);
   const sc = getAddress(scAddress as Address);
-  const g = getAddress(gAddress as Address);
+  const zkf = getAddress(zkfAddress as Address);
   const eub = getAddress(eubAddress as Address);
   // The handler names other contracts now: the guess read the wrong ones.
-  if (
-    !isAddressEqual(sc, guess.sc) ||
-    !isAddressEqual(g, guess.g) ||
-    !isAddressEqual(eub, guess.eub)
-  )
-    return null;
+  if (!sameContracts({ sc, zkf, eub }, guess)) return null;
   const scMembers = take(guess.scCount).map((m) => getAddress(m as Address));
-  const gMembers = take(guess.gCount).map((m) => getAddress(m as Address));
-  const [scDomain, gDomain, eubDomain] = take(3) as DomainAnswer[];
+  const [scDomain, eubDomain] = take(2) as DomainAnswer[];
   return {
     puh,
     sc,
-    g,
+    zkf,
     eub,
     frozenUntil: frozenUntil as bigint,
     freezeStatus: freezeStatus as number,
     scMembers,
-    gMembers,
     scDomain: scDomain ?? null,
-    gDomain: gDomain ?? null,
     eubDomain: eubDomain ?? null,
     scValues: take(SC_GETTERS.length),
-    gValues: take(G_GETTERS.length),
     eubValues: take(EUB_GETTERS.length),
   };
 }
@@ -454,9 +422,8 @@ function domainOf(
 
 function shape(net: Network, at: BlockRef, reads: Reads): Governance {
   const warnings: string[] = [];
-  const { puh, sc, g, eub } = reads;
+  const { puh, sc, zkf, eub } = reads;
   const scDomain = domainOf(reads.scDomain, sc, "SecurityCouncil", net.chainId, warnings);
-  const gDomain = domainOf(reads.gDomain, g, "Guardians", net.chainId, warnings);
   const eubDomain = domainOf(reads.eubDomain, eub, "EmergencyUpgradeBoard", net.chainId, warnings);
   const [scEip1271, scApprove, scSoft, scSoftConservative, scHard, scUnfreeze, ...scRest] =
     reads.scValues as bigint[];
@@ -467,27 +434,17 @@ function shape(net: Network, at: BlockRef, reads: Reads): Governance {
     bigint,
     Address,
   ];
-  const [gEip1271, gApprove, gVeto, gCancel, gNonce, gHandler] = reads.gValues as [
-    bigint,
-    bigint,
-    bigint,
-    bigint,
-    bigint,
-    Address,
-  ];
-  const [zkFoundation, eubSc, eubG, eubHandler] = reads.eubValues as Address[];
+  const [eubZkf, eubSc, eubHandler] = reads.eubValues as Address[];
 
   const expect = (what: string, actual: Address, expected: Address) => {
     if (!isAddressEqual(actual, expected))
       warnings.push(`${what} is ${actual}, expected ${expected}`);
   };
   expect("SecurityCouncil.PROTOCOL_UPGRADE_HANDLER", scHandler, puh);
-  expect("Guardians.PROTOCOL_UPGRADE_HANDLER", gHandler, puh);
   expect("EmergencyUpgradeBoard.PROTOCOL_UPGRADE_HANDLER", eubHandler as Address, puh);
   expect("EmergencyUpgradeBoard.SECURITY_COUNCIL", eubSc as Address, sc);
-  expect("EmergencyUpgradeBoard.GUARDIANS", eubG as Address, g);
+  expect("EmergencyUpgradeBoard.ZK_FOUNDATION_SAFE", eubZkf as Address, zkf);
   if (reads.scMembers.length === 0) warnings.push(`SecurityCouncil ${sc} reports no members`);
-  if (reads.gMembers.length === 0) warnings.push(`Guardians ${g} reports no members`);
 
   return {
     network: {
@@ -523,22 +480,11 @@ function shape(net: Network, at: BlockRef, reads: Reads): Governance {
         setSoftFreezeThreshold: thresholdNonce.toString(),
       },
     },
-    guardians: {
-      address: g,
-      domain: gDomain,
-      members: reads.gMembers,
-      eip1271Threshold: Number(gEip1271),
-      thresholds: {
-        approveUpgrade: Number(gApprove),
-        extendLegalVeto: Number(gVeto),
-        cancelL2Proposal: Number(gCancel),
-      },
-      nonce: gNonce.toString(),
-    },
+    zkFoundation: zkf,
     emergencyUpgradeBoard: {
       address: eub,
       domain: eubDomain,
-      zkFoundation: getAddress(zkFoundation as Address),
+      zkFoundation: getAddress(eubZkf as Address),
     },
     freeze: {
       protocolFrozenUntil: reads.frozenUntil.toString(),
@@ -585,24 +531,23 @@ async function readAt(net: Network, at: BlockRef): Promise<Governance> {
     layout = {
       puh: reads.puh,
       sc: reads.sc,
-      g: reads.g,
+      zkf: reads.zkf,
       eub: reads.eub,
       scCount: reads.scMembers.length,
-      gCount: reads.gMembers.length,
     };
     lastReads = reads;
   }
   return shape(net, at, reads);
 }
 
-// Governance at a head, for pages. What the Security Council, Guardians and Emergency Upgrade Board
-// hold never changes after their constructors PROVIDED they run the pinned code (chain/pins.ts), so
+// Governance at a head, for pages. What the Security Council and the Emergency Upgrade Board hold
+// never changes after their constructors PROVIDED they run the pinned code (chain/pins.ts), so
 // pages keep that part from the last full read and read what changes at each head. Anything else
 // (other contracts, a value unknown at the head, no pins): a full read. JSON never reads this.
 
 type Mutables = {
   sc: Address;
-  g: Address;
+  zkf: Address;
   eub: Address;
   frozenUntil: bigint;
   freezeStatus: number;
@@ -611,7 +556,6 @@ type Mutables = {
   hardFreezeNonce: bigint;
   unfreezeNonce: bigint;
   thresholdNonce: bigint;
-  guardiansNonce: bigint;
 };
 
 const MUTABLE_SC_GETTERS = [
@@ -625,7 +569,7 @@ const MUTABLE_SC_GETTERS = [
 /** The mutable values from the head's aggregate3; null when any is unknown at the head. */
 async function readMutablesAt(
   puh: Address,
-  at: { sc: Address; g: Address },
+  at: { sc: Address },
   head: BlockRef
 ): Promise<Mutables | null> {
   const calls: { target: Address; abi: Abi; functionName: string }[] = [
@@ -639,7 +583,6 @@ async function readMutablesAt(
       abi: securityCouncilAbi as Abi,
       functionName,
     })),
-    { target: at.g, abi: guardiansAbi as Abi, functionName: "nonce" },
   ];
   let results: SubResult[];
   try {
@@ -669,22 +612,11 @@ async function readMutablesAt(
       return null;
     }
   }
-  const [
-    sc,
-    g,
-    eub,
-    frozenUntil,
-    freezeStatus,
-    softThreshold,
-    soft,
-    hard,
-    unfreeze,
-    setting,
-    gNonce,
-  ] = values;
+  const [sc, zkf, eub, frozenUntil, freezeStatus, softThreshold, soft, hard, unfreeze, setting] =
+    values;
   return {
     sc: getAddress(sc as Address),
-    g: getAddress(g as Address),
+    zkf: getAddress(zkf as Address),
     eub: getAddress(eub as Address),
     frozenUntil: frozenUntil as bigint,
     freezeStatus: Number(freezeStatus),
@@ -693,7 +625,6 @@ async function readMutablesAt(
     hardFreezeNonce: hard as bigint,
     unfreezeNonce: unfreeze as bigint,
     thresholdNonce: setting as bigint,
-    guardiansNonce: gNonce as bigint,
   };
 }
 
@@ -704,22 +635,19 @@ function overlay(base: Reads, m: Mutables): Reads {
   scValues[SC_GETTERS.indexOf("hardFreezeNonce")] = m.hardFreezeNonce;
   scValues[SC_GETTERS.indexOf("unfreezeNonce")] = m.unfreezeNonce;
   scValues[SC_GETTERS.indexOf("softFreezeThresholdSettingNonce")] = m.thresholdNonce;
-  const gValues = [...base.gValues];
-  gValues[G_GETTERS.indexOf("nonce")] = m.guardiansNonce;
   return {
     ...base,
     sc: m.sc,
-    g: m.g,
+    zkf: m.zkf,
     eub: m.eub,
     frozenUntil: m.frozenUntil,
     freezeStatus: m.freezeStatus,
     scValues,
-    gValues,
   };
 }
 
-const sameContracts = (a: { sc: Address; g: Address; eub: Address }, b: typeof a) =>
-  isAddressEqual(a.sc, b.sc) && isAddressEqual(a.g, b.g) && isAddressEqual(a.eub, b.eub);
+const sameContracts = (a: { sc: Address; zkf: Address; eub: Address }, b: typeof a) =>
+  isAddressEqual(a.sc, b.sc) && isAddressEqual(a.zkf, b.zkf) && isAddressEqual(a.eub, b.eub);
 
 /** A definite answer (false for no pins or other code); rejects when a code hash cannot be read. */
 async function pinnedContracts(reads: Reads): Promise<boolean> {
@@ -727,7 +655,6 @@ async function pinnedContracts(reads: Reads): Promise<boolean> {
   if (!pins) return false;
   const checks = await Promise.all([
     runsPinnedCode(reads.sc, councilPins(pins, "securityCouncil")),
-    runsPinnedCode(reads.g, councilPins(pins, "guardians")),
     runsPinnedCode(reads.eub, councilPins(pins, "emergencyUpgradeBoard")),
   ]);
   return checks.every(Boolean);
@@ -748,10 +675,10 @@ export async function governanceSplitApplies(): Promise<boolean> {
 }
 
 // Whether `reads`' contracts run the pinned code, once known; until then false, with the check
-// (three eth_getCode, once per process) started a moment later on its own. Only a definite answer
+// (two eth_getCode, once per process) started a moment later on its own. Only a definite answer
 // is kept: a failed or disallowed check starts again when next needed.
 function pinsChecked(reads: Reads): boolean {
-  const key = [reads.sc, reads.g, reads.eub].join(",").toLowerCase();
+  const key = [reads.sc, reads.eub].join(",").toLowerCase();
   let check = pinChecks.get(key);
   if (!check) {
     check = { result: null, started: false };

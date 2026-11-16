@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EMERGENCY_ID, MAINNET, SAFE_MESSAGES } from "../support/fixtures";
 
 // Turning Safe listings into proposals (real recorded messages), and the on-chain rules for when
-// a freeze request or a veto can still be executed.
+// a freeze request can still be executed.
 
 const listings = vi.hoisted(() => ({ tamper: false }));
 
@@ -31,7 +31,6 @@ vi.mock("@/.server/safe/store", async () => {
 
 const { collectMessages } = await import("@/.server/flows/messages");
 const { freezeState } = await import("@/.server/flows/freeze");
-const { vetoState } = await import("@/.server/flows/l2-veto");
 
 const ALL_SAFES = Object.keys(SAFE_MESSAGES).map((s) => getAddress(s));
 const board = {
@@ -42,7 +41,6 @@ const board = {
 };
 const EMERGENCY = [
   "ExecuteEmergencyUpgradeSecurityCouncil",
-  "ExecuteEmergencyUpgradeGuardians",
   "ExecuteEmergencyUpgradeZKFoundation",
 ] as const;
 
@@ -59,8 +57,9 @@ describe("collectMessages", () => {
     const count = (type: string) =>
       forId.find((g) => g.typedData.primaryType === type)?.reportedSigners.length;
     expect(count("ExecuteEmergencyUpgradeSecurityCouncil")).toBe(7);
-    expect(count("ExecuteEmergencyUpgradeGuardians")).toBe(5);
     expect(count("ExecuteEmergencyUpgradeZKFoundation")).toBe(1);
+    // The recorded Guardians' messages (before ZIP-19) are not among them.
+    expect(forId.map((g) => g.typedData.primaryType).sort()).toEqual([...EMERGENCY].sort());
   });
 
   it("ignores messages for another contract's domain", async () => {
@@ -76,9 +75,7 @@ describe("collectMessages", () => {
   });
 });
 
-function gov(
-  overrides: { nonce?: string; now?: string; freezeStatus?: number; guardiansNonce?: string } = {}
-) {
+function gov(overrides: { nonce?: string; now?: string; freezeStatus?: number } = {}) {
   return {
     latestBlock: { number: "1", timestamp: overrides.now ?? "1000" },
     freeze: { protocolFrozenUntil: "0", lastFreezeStatus: overrides.freezeStatus ?? 0 },
@@ -97,7 +94,6 @@ function gov(
         unfreeze: 6,
       },
     },
-    guardians: { nonce: overrides.guardiansNonce ?? "1" },
   } as unknown as Governance;
 }
 
@@ -123,31 +119,5 @@ describe("freezeState", () => {
     expect(
       freezeState(gov(), { ...soft, action: "SetSoftFreezeThreshold", threshold: "7" }).status
     ).toBe("closed");
-  });
-});
-
-describe("vetoState", () => {
-  const veto = {
-    l2ProposalId: "1",
-    l2GovernorAddress: MAINNET.guardians,
-    l2GasLimit: "1",
-    l2GasPerPubdataByteLimit: "1",
-    refundRecipient: MAINNET.guardians,
-    txMintValue: "0",
-    nonce: "1",
-  };
-  it("is open only for the Guardians' next nonce while the L2 proposal can be cancelled", () => {
-    expect(vetoState(gov(), veto, null).status).toBe("open");
-    expect(vetoState(gov({ guardiansNonce: "2" }), veto, null).status).toBe("done");
-    expect(vetoState(gov({ guardiansNonce: "0" }), veto, null).status).toBe("closed");
-    const executed = { state: "Executed" } as Parameters<typeof vetoState>[2];
-    expect(vetoState(gov(), veto, executed).status).toBe("closed");
-  });
-
-  it("stays open when the L2 proposal's state is unknown: only a known final state closes it", () => {
-    const unknown = { state: null } as Parameters<typeof vetoState>[2];
-    expect(vetoState(gov(), veto, unknown).status).toBe("open");
-    const active = { state: "Active" } as Parameters<typeof vetoState>[2];
-    expect(vetoState(gov(), veto, active).status).toBe("open");
   });
 });

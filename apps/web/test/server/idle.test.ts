@@ -150,17 +150,17 @@ describe("I-1: nobody uses the app", () => {
   it("sends nothing upstream for 6 h after the last beat's keep-warm and one wake, every upstream failing", async () => {
     const w = world();
     await backfilled();
-    // A page load, then its tab beats: the council's set and the vetoable list on screen.
+    // A page load, then its tab beats: the council's set and the startable list on screen.
     noteRequest(page("/app/proposals/0xab"));
     const set = watchSignatureSet(councilSet());
-    beat(["status", "upgrade:0xab", set.key, "list:vetoes"]);
+    beat(["status", "upgrade:0xab", set.key, "list:startable"]);
     await until(() => syncEngineStatus().ticks >= 1);
     // In use for a while, with a new block: the head, the set's member Safes and Era are followed.
     let lastBeat = Date.now();
     for (let i = 0; i < 2; i++) {
       await vi.advanceTimersByTimeAsync(10_000);
       lastBeat = Date.now();
-      beat(["status", "upgrade:0xab", set.key, "list:vetoes"]);
+      beat(["status", "upgrade:0xab", set.key, "list:startable"]);
     }
     w.produce(HEAD + 1n);
     await vi.advanceTimersByTimeAsync(5_000);
@@ -274,7 +274,7 @@ describe("I-3: the first use after an hour's pause", () => {
       .flatMap((p) => p.calls)
       .filter((c) => c.method === "eth_getBlockByNumber" && c.params[0] === "latest");
     expect(latest).toHaveLength(1);
-    // Governance in one round: one POST of four entries, the handler's code among them.
+    // Governance in one round: one POST of three entries, the handler's code among them.
     const governancePosts = w.l1.posts
       .slice(from)
       .filter((p) =>
@@ -285,7 +285,7 @@ describe("I-3: the first use after an hour's pause", () => {
         )
       );
     expect(governancePosts).toHaveLength(1);
-    expect((governancePosts[0] as FakePost).calls).toHaveLength(4);
+    expect((governancePosts[0] as FakePost).calls).toHaveLength(3);
     expect(w.l1.calls.filter((c) => c.functionName === "securityCouncil")).toHaveLength(2);
     // The missed blocks in one tail read (the provider has no range cap here), shared by the
     // list and the engine; the other read is the log-history canary (its 10 minutes are up).
@@ -335,7 +335,7 @@ describe("I-3: the first use after an hour's pause", () => {
     // One head read ('latest' with 'finalized') up to the head being served: the engine's own.
     expect(heads("latest")).toHaveLength(1);
     expect(heads("finalized")).toHaveLength(1);
-    // Governance in one round (one POST of four entries), pinned to that head.
+    // Governance in one round (one POST of three entries), pinned to that head.
     const governancePosts = posts.filter((p) =>
       p.calls.some(
         (c) =>
@@ -344,7 +344,7 @@ describe("I-3: the first use after an hour's pause", () => {
       )
     );
     expect(governancePosts).toHaveLength(1);
-    expect((governancePosts[0] as FakePost).calls).toHaveLength(4);
+    expect((governancePosts[0] as FakePost).calls).toHaveLength(3);
     expect(
       w.l1.calls.filter((c) => c.functionName === "securityCouncil").map((c) => c.block)
     ).toContain(numberToHex(gapTo));

@@ -30,15 +30,7 @@ import { UPGRADE_STATES } from "@/common/upgrade-states";
 import { type Address, type Hex, encodeFunctionData } from "viem";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeRpcError } from "../support/fake-jsonrpc";
-import {
-  FAKE_PINS,
-  G_MEMBERS,
-  L1,
-  type L1Call,
-  REVERTS,
-  SC_MEMBERS,
-  fakeReceipt,
-} from "../support/fake-l1";
+import { FAKE_PINS, L1, type L1Call, REVERTS, SC_MEMBERS, fakeReceipt } from "../support/fake-l1";
 import {
   EUB_DOMAIN,
   HEAD,
@@ -671,15 +663,16 @@ describe("S-24: what moves a revision", () => {
     expect(compareRevs([rev]).changed).toEqual([key]);
   });
 
-  it("the status: a governance value that changes without a log (the Guardians' nonce), never the block it was read at", async () => {
-    // From block `change` on, the Guardians' nonce is 7 (a veto used it; no log at the Guardians).
+  it("the status: a governance value that changes without a log (the soft freeze threshold), never the block it was read at", async () => {
+    // From block `change` on, the Security Council's soft freeze threshold is 2
+    // (setSoftFreezeThreshold: no log anywhere).
     let change = Number.POSITIVE_INFINITY;
     const w = liveWorld({
       answer: (call) =>
-        call.functionName === "nonce" &&
+        call.functionName === "softFreezeThreshold" &&
         call.block !== "latest" &&
         Number(BigInt(call.block)) >= change
-          ? 7n
+          ? 2n
           : undefined,
     });
     await backfilled();
@@ -1119,7 +1112,7 @@ describe("Fetch signatures (POST /resources/safe-check)", () => {
             "sec-fetch-site": "same-origin",
             ...(declare ? { "content-length": "4096" } : {}),
           },
-          body: JSON.stringify({ key: "list:vetoes", pad: "x".repeat(4_000) }),
+          body: JSON.stringify({ key: "list:freeze", pad: "x".repeat(4_000) }),
         }),
         params: {},
         context: {},
@@ -1152,7 +1145,7 @@ describe("an open set's page next to a list fed by Safe (two visible tabs)", () 
     const params = openSet();
     w.signInSafe(SC_MEMBERS[0] as Address, params.typedData, ecdsa(901));
     await backfilled();
-    // Tab two: the emergency list (the Safes of the Council, the Guardians and the Foundation).
+    // Tab two: the emergency list (the Safes of the Council and the Foundation).
     noteRequest(pageGet("/app/emergency"));
     const key = watchKeys.emergencies(false);
     const head = await settle(latestBlock());
@@ -1182,44 +1175,44 @@ describe("an open set's page next to a list fed by Safe (two visible tabs)", () 
       if (!at || BigInt(at) < BigInt(answer.head?.number as string)) behind.push(i);
     }
     expect(behind).toEqual([]);
-    expect(safeStoreStatus().watched).toMatchObject({ safes: 2, lists: 5 });
+    expect(safeStoreStatus().watched).toMatchObject({ safes: 2, lists: 2 });
     // 100 blocks with two tabs beating: about 1.5 s on its own, past 5 s under load.
   }, 30_000);
 });
 
-describe("a list fed by Safe on screen (the veto list)", () => {
+describe("a list fed by Safe on screen (the freeze list)", () => {
   it("each beat's answer says when its Safes were checked and when they are next, moving with every check although the list stays the same (no reload)", async () => {
     const w = liveWorld();
     await backfilled();
-    noteRequest(pageGet("/app/l2-cancellations"));
+    noteRequest(pageGet("/app/freeze"));
     // The tab beats the revision it rendered: the answer speaks of its Safes only if current.
-    const item: { key: string; rev: string | null } = { key: watchKeys.vetoes, rev: null };
+    const item: { key: string; rev: string | null } = { key: watchKeys.freezes, rev: null };
     const tabBeat = async () => {
-      item.rev = currentRev(watchKeys.vetoes);
-      return (await beatThroughRoute([item])).checked[watchKeys.vetoes];
+      item.rev = currentRev(watchKeys.freezes);
+      return (await beatThroughRoute([item])).checked[watchKeys.freezes];
+    };
+    // The engine notes the list at each served head (from the Safe copies held): a block each step.
+    const step = async () => {
+      w.nextBlock();
+      await vi.advanceTimersByTimeAsync(10_000);
+      return tabBeat();
     };
     let check = await tabBeat();
-    for (let i = 0; i < 30 && !check?.checkedAt; i++) {
-      await vi.advanceTimersByTimeAsync(10_000);
-      check = await tabBeat();
-    }
-    // The Guardians' Safes, read once each, then every 5 minutes (the list cadence).
+    for (let i = 0; i < 30 && !check?.checkedAt; i++) check = await step();
+    // The Security Council's Safes, read once each, then every 5 minutes (the list cadence).
     expect(check).toMatchObject({ state: "watching", cadenceMs: 300_000 });
     const first = Date.parse(check?.checkedAt as string);
     const from = mark(w);
-    for (let i = 0; i < 33; i++) {
-      await vi.advanceTimersByTimeAsync(10_000);
-      check = await tabBeat();
-    }
+    for (let i = 0; i < 33; i++) check = await step();
     const cost = since(w, from);
     // One small change check each (a listing only for a Safe whose newest message the world's
-    // equal timestamps make ambiguous).
-    expect(cost.checks).toBe(G_MEMBERS.length);
-    expect(cost.listings).toBeLessThanOrEqual(1);
+    // equal timestamps make ambiguous: the two members that signed both of the world's sets).
+    expect(cost.checks).toBe(SC_MEMBERS.length);
+    expect(cost.listings).toBeLessThanOrEqual(2);
     // Copies read together are checked again spread over one cadence (safe/store.ts checkQueue):
     // the oldest one is now one checked since, at least a cadence / count later.
     expect(Date.parse(check?.checkedAt as string) - first).toBeGreaterThanOrEqual(
-      300_000 / G_MEMBERS.length - 1_000
+      300_000 / SC_MEMBERS.length - 1_000
     );
     expect(Date.parse(check?.nextAt as string) - Date.now()).toBeLessThanOrEqual(300_000);
     presence().beat({ tab: "tab-under-test", reason: "leave", items: [] });

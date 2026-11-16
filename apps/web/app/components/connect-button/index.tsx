@@ -12,7 +12,6 @@ import { useAccount, useConfig, useConnect, useSwitchChain } from "wagmi";
 
 const GROUP_LABEL: Record<SignerGroup, string> = {
   securityCouncil: "Security Council",
-  guardians: "Guardian",
   zkFoundation: "ZKsync Foundation",
 };
 
@@ -31,8 +30,6 @@ export function useConnectedGroups(): {
   const groups: SignerGroup[] = [];
   if (governance.securityCouncil.members.some((m) => isAddressEqual(m as Address, address)))
     groups.push("securityCouncil");
-  if (governance.guardians.members.some((m) => isAddressEqual(m as Address, address)))
-    groups.push("guardians");
   if (isAddressEqual(governance.emergencyUpgradeBoard.zkFoundation as Address, address))
     groups.push("zkFoundation");
   return { address, groups, known: true };

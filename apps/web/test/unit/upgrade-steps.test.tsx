@@ -5,8 +5,8 @@ import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { describe, expect, it } from "vitest";
 
-// A standard upgrade's timeline assumes the Security Council path; the Guardians' path shows only
-// once they took it.
+// A standard upgrade's timeline assumes the Security Council path; the ZK Foundation's path shows
+// only once it took it.
 
 const DAY = 86_400;
 const created = 1_792_582_860; // Oct 21, 2026, 11:41 UTC
@@ -21,7 +21,7 @@ const timeline = {
 const view = (
   state: number,
   t: Partial<typeof timeline> = {},
-  extra: { guardiansApproved?: boolean } = {}
+  extra: { zkFoundationApproved?: boolean } = {}
 ) =>
   render(
     <Timeline
@@ -30,7 +30,7 @@ const view = (
         state,
         timeline: { ...timeline, ...t },
         legalVetoExtended: false,
-        guardiansApproved: extra.guardiansApproved ?? false,
+        zkFoundationApproved: extra.zkFoundationApproved ?? false,
         now: created + DAY,
       })}
     />
@@ -49,7 +49,7 @@ describe("a standard upgrade's timeline", () => {
       "Ready to execute1 day after approval",
       "Executed",
     ]);
-    expect(screen.queryByText(/Guardians|30 days/)).toBeNull();
+    expect(screen.queryByText(/ZK Foundation|30 days/)).toBeNull();
   });
 
   it("waiting: the approval is due by the end of the 30 days", () => {
@@ -64,9 +64,9 @@ describe("a standard upgrade's timeline", () => {
     expect(steps()[3]).toBe("Ready to executeOct 26, 2026, 11:41 UTC");
   });
 
-  it("names the Guardians only once they approved, and an upgrade nobody approved in time", () => {
-    const { unmount } = view(UPGRADE_STATES.Waiting, {}, { guardiansApproved: true });
-    expect(steps()[2]).toBe("Approved by the GuardiansTakes effect Nov 23, 2026, 11:41 UTC");
+  it("names the ZK Foundation only once it approved, and an upgrade nobody approved in time", () => {
+    const { unmount } = view(UPGRADE_STATES.Waiting, {}, { zkFoundationApproved: true });
+    expect(steps()[2]).toBe("Approved by the ZK FoundationTakes effect Nov 23, 2026, 11:41 UTC");
     unmount();
     view(UPGRADE_STATES.Expired);
     expect(steps()[2]).toBe("Not approved in timeNov 23, 2026, 11:41 UTC");

@@ -1,6 +1,6 @@
 import type { Lane } from "@/.server/chain/jsonrpc";
 import type { SignatureSet } from "@/.server/signatures";
-import { guardiansAbi, safeAbi } from "@/common/abis";
+import { safeAbi, securityCouncilAbi } from "@/common/abis";
 import { buildTypedData, governanceHashes } from "@/common/typed-data";
 import { type Address, type Hex, getAddress } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -183,7 +183,7 @@ beforeEach(() => {
   state.lists.clear();
   state.gate = null;
   state.sent = [];
-  state.lane = fakeCallLane(contracts({ abis: [guardiansAbi, safeAbi], call: answer })).lane;
+  state.lane = fakeCallLane(contracts({ abis: [securityCouncilAbi, safeAbi], call: answer })).lane;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string) => {
@@ -469,7 +469,6 @@ describe("pending messages from Safe listings held", () => {
   };
   const EMERGENCY = [
     "ExecuteEmergencyUpgradeSecurityCouncil",
-    "ExecuteEmergencyUpgradeGuardians",
     "ExecuteEmergencyUpgradeZKFoundation",
   ] as const;
   const count = (groups: { typedData: { message: Record<string, unknown> } }[]) =>
@@ -483,7 +482,7 @@ describe("pending messages from Safe listings held", () => {
     const strict = await collectMessages(SAFES, EMERGENCY, board);
     expect(strict).toMatchObject({ stale: false, errors: [], anomalies: 0 });
     expect(Date.parse(strict.safeFetchedAt as string)).toBeGreaterThanOrEqual(readAt);
-    expect(count(strict.groups)).toBe(3);
+    expect(count(strict.groups)).toBe(2);
     const sent = state.sent.length;
 
     // Within 60 s: the same list, not stale.

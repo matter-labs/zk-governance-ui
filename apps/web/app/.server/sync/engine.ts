@@ -854,7 +854,6 @@ export function liveSteps(): TickStep[] {
           const keys = [...presence().onScreen()].filter(
             (key) => !key.startsWith("set:") && !key.startsWith("sim:") && !isL2Key(key)
           );
-          if (presence().onScreen().has("list:vetoes")) keys.push("list:vetoes");
           await noteOnScreenContent(tick.head, keys, () => tick.current() && tick.inUse());
         } finally {
           contentPassedAt = tick.head.hash;
@@ -865,14 +864,13 @@ export function liveSteps(): TickStep[] {
 }
 
 // The signer groups' Safes the lists on screen collect from, from the last governance pages read.
-let groupSafes: { council: Address[]; guardians: Address[]; foundation: Address } | null = null;
+let groupSafes: { council: Address[]; foundation: Address } | null = null;
 
 async function refreshListSafes(): Promise<void> {
   try {
     const gov = await pageGovernance();
     groupSafes = {
       council: gov.securityCouncil.members,
-      guardians: gov.guardians.members,
       foundation: gov.emergencyUpgradeBoard.zkFoundation,
     };
   } catch {
@@ -885,9 +883,8 @@ function listSafes(keys: ReadonlySet<string>): Address[] {
   if (!groups) return [];
   const safes: Address[] = [];
   if ([...keys].some((key) => key.startsWith("list:emergency")))
-    safes.push(...groups.council, ...groups.guardians, groups.foundation);
+    safes.push(...groups.council, groups.foundation);
   if (keys.has("list:freeze")) safes.push(...groups.council);
-  if (keys.has("list:vetoes")) safes.push(...groups.guardians);
   return safes;
 }
 
@@ -895,8 +892,7 @@ function listSafes(keys: ReadonlySet<string>): Address[] {
 export function listSafeChecks(keys: readonly string[]): Record<string, SafeCheck> {
   const checks: Record<string, SafeCheck> = {};
   for (const key of keys) {
-    if (!key.startsWith("list:emergency") && key !== "list:freeze" && key !== "list:vetoes")
-      continue;
+    if (!key.startsWith("list:emergency") && key !== "list:freeze") continue;
     const safes = listSafes(new Set([key]));
     if (safes.length > 0) checks[key] = safeCheckOf(safes, "list");
   }

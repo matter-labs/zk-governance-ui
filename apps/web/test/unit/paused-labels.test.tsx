@@ -21,7 +21,6 @@ vi.mock("@/components/governance-context", async (importOriginal) => {
     governance: {
       network: { explorerUrl: "https://etherscan.io", l2ExplorerUrl: null },
       securityCouncil: { members: [MEMBER_A, MEMBER_B, MEMBER_C] },
-      guardians: { members: [] },
       emergencyUpgradeBoard: { zkFoundation: "0x0000000000000000000000000000000000000009" },
     },
   });

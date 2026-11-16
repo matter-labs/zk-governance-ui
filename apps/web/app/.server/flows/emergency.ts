@@ -1,4 +1,5 @@
 import {
+  earlierEmergencyUpgradeBoardAbi,
   emergencyUpgradeBoardAbi,
   isErc1271Accepted,
   safeAbi,
@@ -61,7 +62,6 @@ import { currentUpgradeStatus } from "../upgrade-status";
 
 const EMERGENCY_ACTIONS = [
   "ExecuteEmergencyUpgradeSecurityCouncil",
-  "ExecuteEmergencyUpgradeGuardians",
   "ExecuteEmergencyUpgradeZKFoundation",
 ] as const satisfies readonly ActionName[];
 
@@ -173,7 +173,7 @@ export type EmergencySummary = {
   id: Hex;
   /** timestamp: its block's time (unix seconds), when read; never read for the JSON list. */
   executed: { txHash: Hex; blockNumber: string; timestamp?: string } | null;
-  reported: { securityCouncil: number; guardians: number; zkFoundation: boolean };
+  reported: { securityCouncil: number; zkFoundation: boolean };
   firstSeen: string | null;
 };
 
@@ -202,7 +202,7 @@ async function withTimes(events: Executed[]): Promise<Executed[]> {
 const summary = (id: Hex): EmergencySummary => ({
   id,
   executed: null,
-  reported: { securityCouncil: 0, guardians: 0, zkFoundation: false },
+  reported: { securityCouncil: 0, zkFoundation: false },
   firstSeen: null,
 });
 
@@ -225,8 +225,6 @@ async function pendingFrom(collected: Collected): Promise<PendingEmergencies> {
     const n = group.reportedSigners.length;
     if (group.typedData.primaryType === "ExecuteEmergencyUpgradeSecurityCouncil")
       entry.reported.securityCouncil = n;
-    if (group.typedData.primaryType === "ExecuteEmergencyUpgradeGuardians")
-      entry.reported.guardians = n;
     if (group.typedData.primaryType === "ExecuteEmergencyUpgradeZKFoundation")
       entry.reported.zkFoundation = n > 0;
     if (!entry.firstSeen || group.firstSeen < entry.firstSeen) entry.firstSeen = group.firstSeen;
@@ -277,11 +275,7 @@ export function loadEmergencyList({
   );
   const signers = governanceFor(freshness).then((gov) => ({
     domain: gov.emergencyUpgradeBoard.domain,
-    safes: [
-      ...gov.securityCouncil.members,
-      ...gov.guardians.members,
-      gov.emergencyUpgradeBoard.zkFoundation,
-    ],
+    safes: [...gov.securityCouncil.members, gov.emergencyUpgradeBoard.zkFoundation],
   }));
   const freshPending = signers.then(({ safes, domain }) =>
     collectMessages(safes, EMERGENCY_ACTIONS, domain, { page: freshness === "page" }).then(
@@ -316,11 +310,7 @@ export async function heldEmergencyList({
 } | null> {
   const gov = await governanceFor("page");
   const collected = await collectHeldMessages(
-    [
-      ...gov.securityCouncil.members,
-      ...gov.guardians.members,
-      gov.emergencyUpgradeBoard.zkFoundation,
-    ],
+    [...gov.securityCouncil.members, gov.emergencyUpgradeBoard.zkFoundation],
     EMERGENCY_ACTIONS,
     gov.emergencyUpgradeBoard.domain
   );
@@ -337,7 +327,7 @@ export async function listEmergencyUpgrades() {
   const board = gov.emergencyUpgradeBoard;
   const [collected, executed] = await Promise.all([
     collectMessages(
-      [...gov.securityCouncil.members, ...gov.guardians.members, board.zkFoundation],
+      [...gov.securityCouncil.members, board.zkFoundation],
       EMERGENCY_ACTIONS,
       board.domain
     ),
@@ -352,7 +342,7 @@ export async function listEmergencyUpgrades() {
       e = {
         id,
         executed: null,
-        reported: { securityCouncil: 0, guardians: 0, zkFoundation: false },
+        reported: { securityCouncil: 0, zkFoundation: false },
         firstSeen: null,
       };
       byId.set(key, e);
@@ -364,8 +354,6 @@ export async function listEmergencyUpgrades() {
     const n = group.reportedSigners.length;
     if (group.typedData.primaryType === "ExecuteEmergencyUpgradeSecurityCouncil")
       e.reported.securityCouncil = n;
-    if (group.typedData.primaryType === "ExecuteEmergencyUpgradeGuardians")
-      e.reported.guardians = n;
     if (group.typedData.primaryType === "ExecuteEmergencyUpgradeZKFoundation")
       e.reported.zkFoundation = n > 0;
     if (!e.firstSeen || group.firstSeen < e.firstSeen) e.firstSeen = group.firstSeen;
@@ -387,7 +375,7 @@ export async function listEmergencyUpgrades() {
 }
 
 export type EmergencyRole = {
-  key: "securityCouncil" | "guardians" | "zkFoundation";
+  key: "securityCouncil" | "zkFoundation";
   title: string;
   set: SignatureSet;
   used: UsedSignature[] | null;
@@ -402,7 +390,12 @@ export type EmergencyExecution = {
   proposal: UpgradeProposal;
   calls: DecodedCall[];
   idMatches: boolean;
-  // EmergencyUpgradeBoard's three checks re-run at the block before execution (archive state).
+  /**
+   * Executed through a board from before ZIP-19, which also checked a third signature set (the
+   * Guardians', dissolved by ZIP-19): only the Security Council's and the ZK Foundation's are shown.
+   */
+  beforeZip19: boolean;
+  // EmergencyUpgradeBoard's checks re-run at the block before execution (archive state).
   historical: {
     block: string;
     checks: { role: string; accepted: boolean | null; error: string | null }[];
@@ -473,14 +466,6 @@ export async function loadEmergencyUpgrade(
       check: { kind: "multisig-1271", contract: gov.securityCouncil.address },
     },
     {
-      key: "guardians",
-      title: "Guardians",
-      action: "ExecuteEmergencyUpgradeGuardians",
-      members: gov.guardians.members,
-      threshold: gov.guardians.eip1271Threshold,
-      check: { kind: "multisig-1271", contract: gov.guardians.address },
-    },
-    {
       key: "zkFoundation",
       title: "ZKsync Foundation",
       action: "ExecuteEmergencyUpgradeZKFoundation",
@@ -522,7 +507,6 @@ export async function loadEmergencyUpgrade(
       ? Promise.resolve({
           domain: board.domain,
           securityCouncil: gov.securityCouncil.address,
-          guardians: gov.guardians.address,
           zkFoundation: board.zkFoundation,
         })
       : earlierBoardRoles(executedBy, gov.network.chainId);
@@ -537,11 +521,12 @@ export async function loadEmergencyUpgrade(
     proposal: decoded.proposal,
     calls: decoded.proposal.calls.map((call) => decodeCall(call)),
     idMatches: upgradeProposalId(decoded.proposal).toLowerCase() === id.toLowerCase(),
+    beforeZip19: decoded.beforeZip19,
   });
 
   const historicalFrom = async (
     event: EmergencyEvent,
-    { board: executedBy, guardians, securityCouncil, zkFoundation }: Decoded
+    { board: executedBy, securityCouncil, zkFoundation }: Decoded
   ): Promise<EmergencyHistorical> => {
     const block = event.blockNumber - 1n;
     const roles = await rolesOf(executedBy);
@@ -563,16 +548,9 @@ export async function loadEmergencyUpgrade(
             block,
             "Security Council"
           ),
-          check1271(
-            roles.guardians,
-            hashes[1] as Pick<SignatureSet, "hashes">,
-            guardians,
-            block,
-            "Guardians"
-          ),
           checkSafe(
             roles.zkFoundation,
-            hashes[2] as Pick<SignatureSet, "hashes">,
+            hashes[1] as Pick<SignatureSet, "hashes">,
             zkFoundation,
             block
           ),
@@ -699,7 +677,6 @@ export async function loadEmergencyUpgrade(
       decoded && zkFoundation
         ? [
             decoded.securityCouncil,
-            decoded.guardians,
             {
               signers: [zkFoundation],
               signatures: [decoded.zkFoundation],
@@ -805,7 +782,11 @@ type Blob = { signers: readonly Address[]; signatures: readonly Hex[] };
 
 type Decoded = NonNullable<Awaited<ReturnType<typeof decodeExecution>>>;
 
-/** An executeEmergencyUpgrade call to `call.to`, its proposal executed by that board; else null. */
+/**
+ * An executeEmergencyUpgrade call to `call.to`, its proposal executed by that board; else null.
+ * Today's two-party board's call, or one to a board from before ZIP-19 (`beforeZip19`), whose
+ * first signature blob (the Guardians') is not read.
+ */
 function decodeBoardCall(call: { to: Address; data: Hex }) {
   const unpack = (blob: Hex): Blob => {
     const [signers, signatures] = decodeAbiParameters(
@@ -814,13 +795,13 @@ function decodeBoardCall(call: { to: Address; data: Hex }) {
     );
     return { signers: signers.map((s) => getAddress(s)), signatures };
   };
-  try {
-    const { functionName, args } = decodeFunctionData({
-      abi: emergencyUpgradeBoardAbi,
-      data: call.data,
-    });
-    if (functionName !== "executeEmergencyUpgrade") return null;
-    const [calls, salt, guardiansBlob, councilBlob, zkFoundation] = args;
+  const decoded = (
+    calls: readonly { target: Address; value: bigint; data: Hex }[],
+    salt: Hex,
+    councilBlob: Hex,
+    zkFoundation: Hex,
+    beforeZip19: boolean
+  ) => {
     const board = getAddress(call.to);
     const proposal: UpgradeProposal = {
       calls: calls.map((c) => ({
@@ -831,22 +812,35 @@ function decodeBoardCall(call: { to: Address; data: Hex }) {
       executor: board,
       salt,
     };
-    return {
-      board,
-      proposal,
-      guardians: unpack(guardiansBlob),
-      securityCouncil: unpack(councilBlob),
-      zkFoundation,
-    };
+    return { board, proposal, securityCouncil: unpack(councilBlob), zkFoundation, beforeZip19 };
+  };
+  try {
+    const { functionName, args } = decodeFunctionData({
+      abi: emergencyUpgradeBoardAbi,
+      data: call.data,
+    });
+    if (functionName !== "executeEmergencyUpgrade") return null;
+    const [calls, salt, councilBlob, zkFoundation] = args;
+    return decoded(calls, salt, councilBlob, zkFoundation, false);
   } catch {
-    // Another function, or a board this build does not know (the two-party board's).
+    // Another function, or a board from before ZIP-19.
+  }
+  try {
+    const { functionName, args } = decodeFunctionData({
+      abi: earlierEmergencyUpgradeBoardAbi,
+      data: call.data,
+    });
+    if (functionName !== "executeEmergencyUpgrade") return null;
+    const [calls, salt, , councilBlob, zkFoundation] = args;
+    return decoded(calls, salt, councilBlob, zkFoundation, true);
+  } catch {
     return null;
   }
 }
 
 /**
- * calls, salt and the three signature blobs from the transaction that executed emergency upgrade
- * `id`, and the board it went through. Today's board's call is taken as it is (its id is compared
+ * calls, salt and the signature blobs from the transaction that executed emergency upgrade `id`,
+ * and the board it went through. Today's board's call is taken as it is (its id is compared
  * where it is shown); a call to another board only when its calls hash to `id` with that board as
  * executor, which only the board the handler named then can have sent (the handler took the id
  * from it): the board already changed once (block 25,134,966).
@@ -862,11 +856,10 @@ async function decodeExecution(txHash: Hex, id: Hex, board: Address) {
   });
 }
 
-/** The contracts a board checks, and its EIP-712 domain: set in its constructor. */
+/** The contracts a board checks (those shown), and its EIP-712 domain: set in its constructor. */
 type BoardRoles = {
   domain: Governance["emergencyUpgradeBoard"]["domain"];
   securityCouncil: Address;
-  guardians: Address;
   zkFoundation: Address;
 };
 
@@ -875,16 +868,14 @@ function earlierBoardRoles(board: Address, chainId: number): Promise<BoardRoles>
   return cached(`board-roles:${chainId}:${board}`, FOREVER, async () => {
     const get = <T>(functionName: string) =>
       callFn<T>({ address: board, abi: emergencyUpgradeBoardAbi, functionName });
-    const [domain, securityCouncil, guardians, zkFoundation] = await Promise.all([
+    const [domain, securityCouncil, zkFoundation] = await Promise.all([
       get<readonly [Hex, string, string, bigint, Address]>("eip712Domain"),
       get<Address>("SECURITY_COUNCIL"),
-      get<Address>("GUARDIANS"),
       get<Address>("ZK_FOUNDATION_SAFE"),
     ]);
     return {
       domain: { name: domain[1], version: domain[2], chainId, verifyingContract: board },
       securityCouncil: getAddress(securityCouncil),
-      guardians: getAddress(guardians),
       zkFoundation: getAddress(zkFoundation),
     };
   });

@@ -85,7 +85,6 @@ const L2 = vi.hoisted(() => ({
   onScreen: 1,
   eraBlock: "72350600",
   readAt: "2026-10-06T06:59:30.000Z",
-  boundaries: 0,
 }));
 
 // What the signature-set precompute reports (signatures.test.ts covers how).

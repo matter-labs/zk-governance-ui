@@ -5,10 +5,15 @@ the page reads every proposal from the chain through **your** RPC, takes members
 Service only as candidates, and counts a signature only when the governance contract itself accepts it in an
 `eth_call`. It never posts to Safe, and signs or sends nothing on its own.
 
-It covers protocol upgrades (Security Council and Guardian approval, legal veto extension), emergency upgrades,
-freeze / unfreeze / soft-freeze threshold requests and Guardian vetoes of L2 proposals. For each it shows what is
-signed, the hashes a Safe owner's hardware wallet displays, who has signed, whether the threshold holds, and the
-calldata to execute.
+It covers ZKsync governance as it is after ZIP-19, which dissolved the Guardians: protocol upgrades (Security Council
+approval, and the ZK Foundation's approval and legal veto extension), emergency upgrades (Security Council and ZK
+Foundation), and freeze / unfreeze / soft-freeze threshold requests. For each it shows what is signed, the hashes a Safe
+owner's hardware wallet displays, who has signed, whether the threshold holds, and the calldata to execute. The ZK
+Foundation approves an upgrade and extends its legal veto with a transaction from its own Safe: for those the page shows
+the exact call and simulates it from the Safe, and with that Safe connected, creates it there as a Safe transaction for
+its owners to confirm and execute. Vetoes of Token and GovOps proposals are the ZK Foundation's own Safe
+transactions on ZKsync Era since TPP-20 and GAP-7, and are not covered. A ProtocolUpgradeHandler from before ZIP-19 is
+reported as not supported.
 
 ## Get the file
 
@@ -67,7 +72,7 @@ Open `verifier.html` in a browser. Until an RPC is saved only **Settings** shows
 | Setting | Use |
 | --- | --- |
 | Ethereum L1 RPC | Required: an Ethereum mainnet or Sepolia RPC with log history (any archive RPC works, e.g. `https://mainnet.gateway.tenderly.co`). The network is detected from it |
-| ZKsync L2 RPC | For vetoes and L2 links (default: the public one) |
+| ZKsync L2 RPC | For L2 proposal titles and links, and upgrades ready to start (default: the public one) |
 | Safe API key | Without one, Safe allows 2 requests/s and 5,000 a month per IP: enough for one signer |
 | WalletConnect project id | Free at [cloud.reown.com](https://cloud.reown.com); the page has a default |
 
@@ -98,9 +103,9 @@ Each goes to `dist/` too.
 
 **What you trust.** Your RPC, the ProtocolUpgradeHandler address pinned in `apps/web/app/common/networks.ts`, and the
 file you open. Everything else is derived from the handler through your RPC: councils, members, thresholds, nonces,
-EIP-712 domains. The page checks the contracts against each other and shows a red banner if they disagree. Vetoes and
-L2 links also trust the ZKsync L2 RPC (by default ZKsync's public one): it decides which L2 proposals can be vetoed and
-their titles, and sees the ids of the proposals you open.
+EIP-712 domains. The page checks the contracts against each other and shows a red banner if they disagree. L2 links
+also trust the ZKsync L2 RPC (by default ZKsync's public one): it gives the protocol governor's proposals and their
+titles, and sees the ids of the proposals you open.
 
 **What you don't trust.** The Safe Transaction Service. Its answers are only a place to look for signatures. A message
 is used only if it is filed under the hash this page computes for that Safe and that action, and a signature counts
