@@ -1,4 +1,4 @@
-import { parseFreezeParams, parseId, parseVetoParams } from "@/.server/params";
+import { parseFreezeParams, parseId } from "@/.server/params";
 import { suppliedSignatures } from "@/.server/request";
 import { describe, expect, it } from "vitest";
 
@@ -26,16 +26,6 @@ describe("URL parameters", () => {
     ).toBe("2");
   });
 
-  it("parses a veto URL with checksummed addresses", () => {
-    const url = new URL(
-      "http://x/?governor=0xb83ff6501214ddf40c91c9565d095400f3f45746&l2GasLimit=30000000&l2GasPerPubdataByteLimit=800&refundRecipient=0xf378708b88841abb63e2316e4fc8f29469bee885&txMintValue=1&nonce=0"
-    );
-    expect(parseVetoParams("42", url).l2GovernorAddress).toBe(
-      "0xb83FF6501214ddF40C91C9565d095400f3F45746"
-    );
-    expect(() => parseVetoParams("0x2a", url)).toThrow();
-  });
-
   it("answers 400 for a value above 2^256 − 1, never a bare 500", async () => {
     const above = ((1n << 256n) + 7n).toString();
     const max = ((1n << 256n) - 1n).toString();
@@ -50,17 +40,7 @@ describe("URL parameters", () => {
     }
     expect(thrown).toBeInstanceOf(Response);
     expect((thrown as Response).status).toBe(400);
-
-    const veto = new URL(
-      `http://x/?governor=0xb83ff6501214ddf40c91c9565d095400f3f45746&l2GasLimit=${above}&l2GasPerPubdataByteLimit=800&refundRecipient=0xf378708b88841abb63e2316e4fc8f29469bee885&txMintValue=1&nonce=0`
-    );
-    expect(() => parseVetoParams("42", veto)).toThrow();
-    try {
-      parseVetoParams("42", veto);
-    } catch (error) {
-      expect((error as Response).status).toBe(400);
-      expect(await (error as Response).text()).toMatch(/^l2GasLimit is above 2\^256/);
-    }
+    expect(await (thrown as Response).text()).toMatch(/^validUntil is above 2\^256/);
   });
 
   it("reads ?sig=<member>:<signature> and skips malformed ones", () => {

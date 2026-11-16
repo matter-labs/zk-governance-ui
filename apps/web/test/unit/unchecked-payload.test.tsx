@@ -29,7 +29,7 @@ describe("an emergency upgrade's unchecked payload", () => {
     expect(onLoad).toHaveBeenCalledTimes(1);
   });
 
-  it("before anyone signed (the first signer, a Guardian say): warned too, without saying others signed", () => {
+  it("before anyone signed (the first signer, a Security Council member say): warned too, without saying others signed", () => {
     render(<UncheckedPayloadWarning roles={unsigned} check={null} onLoad={() => {}} />);
     const warning = screen.getByTestId("unchecked-payload");
     expect(warning).toHaveTextContent("Check the payload before you sign or execute");

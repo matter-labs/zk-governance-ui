@@ -9,12 +9,14 @@ import {
 } from "viem";
 
 // Every governance signature is EIP-712 typed data over one of these primary types. They mirror the
-// TYPEHASH constants in SecurityCouncil.sol, Guardians.sol and EmergencyUpgradeBoard.sol.
+// TYPEHASH constants in SecurityCouncil.sol and EmergencyUpgradeBoard.sol. The ZK Foundation signs
+// only emergency upgrades: it approves standard upgrades and extends their legal veto with a Safe
+// transaction to the ProtocolUpgradeHandler (no typed data of its own).
 
-export type SignerGroup = "securityCouncil" | "guardians" | "zkFoundation";
-export type Verifier = "securityCouncil" | "guardians" | "emergencyUpgradeBoard";
+export type SignerGroup = "securityCouncil" | "zkFoundation";
+export type Verifier = "securityCouncil" | "emergencyUpgradeBoard";
 
-type Field = { readonly name: string; readonly type: "bytes32" | "uint256" | "address" };
+type Field = { readonly name: string; readonly type: "bytes32" | "uint256" };
 
 const ID = [{ name: "id", type: "bytes32" }] as const satisfies readonly Field[];
 const FREEZE = [
@@ -28,16 +30,9 @@ export const ACTIONS = {
     signers: "securityCouncil",
     fields: ID,
   },
-  ApproveUpgradeGuardians: { verifier: "guardians", signers: "guardians", fields: ID },
-  ExtendLegalVetoPeriod: { verifier: "guardians", signers: "guardians", fields: ID },
   ExecuteEmergencyUpgradeSecurityCouncil: {
     verifier: "emergencyUpgradeBoard",
     signers: "securityCouncil",
-    fields: ID,
-  },
-  ExecuteEmergencyUpgradeGuardians: {
-    verifier: "emergencyUpgradeBoard",
-    signers: "guardians",
     fields: ID,
   },
   ExecuteEmergencyUpgradeZKFoundation: {
@@ -52,19 +47,6 @@ export const ACTIONS = {
     verifier: "securityCouncil",
     signers: "securityCouncil",
     fields: [{ name: "threshold", type: "uint256" }, ...FREEZE],
-  },
-  CancelL2GovernorProposal: {
-    verifier: "guardians",
-    signers: "guardians",
-    fields: [
-      { name: "l2ProposalId", type: "uint256" },
-      { name: "l2GovernorAddress", type: "address" },
-      { name: "l2GasLimit", type: "uint256" },
-      { name: "l2GasPerPubdataByteLimit", type: "uint256" },
-      { name: "refundRecipient", type: "address" },
-      { name: "txMintValue", type: "uint256" },
-      { name: "nonce", type: "uint256" },
-    ],
   },
 } as const satisfies Record<
   string,
@@ -193,13 +175,7 @@ export function parseGovernanceTypedData(
     const text = String(value);
     if (field.type === "uint256" && !/^\d+$/.test(text)) return null;
     if (field.type === "bytes32" && !/^0x[0-9a-fA-F]{64}$/.test(text)) return null;
-    if (field.type === "address" && !/^0x[0-9a-fA-F]{40}$/.test(text)) return null;
-    message[field.name] =
-      field.type === "address"
-        ? getAddress(text)
-        : field.type === "bytes32"
-          ? text.toLowerCase()
-          : text;
+    message[field.name] = field.type === "bytes32" ? text.toLowerCase() : text;
   }
   return buildTypedData(
     action,

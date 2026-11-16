@@ -37,7 +37,6 @@ const MEMBERS = [
 const governance = (block: bigint) => ({
   latestBlock: { number: block.toString(), timestamp: "1790000000" },
   securityCouncil: { members: [...MEMBERS] },
-  guardians: { members: [...MEMBERS] },
   emergencyUpgradeBoard: { zkFoundation: MEMBERS[0] },
 });
 const world = vi.hoisted(() => ({
@@ -168,10 +167,10 @@ describe("a list built on governance is noted at the block its governance was re
   it('"Check Safe now" notes the list it read at that block too', async () => {
     served(200n);
     world.governanceBlock = 196n;
-    // The council's Safes; for emergencies the guardians' and the foundation's too.
+    // The council's Safes; for emergencies the foundation's too.
     for (const [key, safes] of [
       ["list:freeze", 2],
-      ["list:emergency", 5],
+      ["list:emergency", 3],
     ] as const) {
       const response = (await safeCheckAction({
         request: new Request("http://localhost/resources/safe-check", {

@@ -30,7 +30,6 @@ vi.mock("@/components/governance-context", async (importOriginal) => {
     governance: {
       network: { explorerUrl: "https://etherscan.io", l2ExplorerUrl: null },
       securityCouncil: { members: [MEMBER_A, MEMBER_B, MEMBER_C] },
-      guardians: { members: [] },
       emergencyUpgradeBoard: { zkFoundation: "0x0000000000000000000000000000000000000009" },
     },
   });
@@ -370,7 +369,7 @@ describe("SignatureSetCard", () => {
         />
         <SignatureSetCard
           testId="set-closed"
-          title="Guardians approval"
+          title="ZKsync Foundation"
           set={set}
           state={{ status: "closed", detail: "The upgrade was executed" }}
         />
@@ -1119,5 +1118,180 @@ describe("Your signature, scrolled past and after signing", () => {
       await act(() => vi.advanceTimersByTimeAsync(0));
       expect(checks).toHaveBeenCalledTimes(10);
     });
+  });
+});
+
+describe("Your signature: the ZK Foundation's own transaction", () => {
+  // The ZKsync Foundation Safe (the governance roles' ZK Foundation above) and its approval call.
+  const ZK_FOUNDATION = "0x0000000000000000000000000000000000000009";
+  const HANDLER = "0x5000000000000000000000000000000000000005";
+  const approval = (state: Record<string, unknown> = { status: "open" }) => ({
+    key: "zkFoundation-approval",
+    title: "ZK Foundation approval",
+    safe: ZK_FOUNDATION,
+    safeLabel: "ZKsync Foundation Safe",
+    state: state as never,
+    execution: {
+      to: HANDLER,
+      value: "0",
+      functionName: "approveUpgradeZkFoundation",
+      data: `0xb75a2103${"ab".repeat(32)}`,
+      simulation: { status: "ok" } as never,
+    },
+    toLabel: "ProtocolUpgradeHandler",
+  });
+  const councilOpen = [
+    { key: "council", title: "Council approval", set, state: { status: "open" } as never },
+  ];
+
+  it("offers the ZKsync Foundation Safe, connected, to create its call as a Safe transaction", () => {
+    wallet.address = ZK_FOUNDATION;
+    const safeTxHash = `0x${"8".repeat(64)}`;
+    walletSend.sendTransaction.mockImplementationOnce(
+      (_tx: unknown, opts: { onSuccess: (hash: string) => void }) => opts.onSuccess(safeTxHash)
+    );
+    render(<YourSignature hint="h" actions={councilOpen} safeCalls={[approval()]} />);
+    const row = screen.getByTestId("create-row-zkFoundation-approval");
+    expect(row).toHaveTextContent("ZK Foundation approvalas ZKsync Foundation Safe");
+    expect(row).toHaveTextContent("Only this Safe can send it: the contract checks the sender.");
+    // Not a Security Council member: nothing to sign, and not said to have nothing to do.
+    expect(screen.queryByTestId("sign-button")).toBeNull();
+    expect(screen.queryByTestId("your-signature-note")).toBeNull();
+    fireEvent.click(screen.getByTestId("review-create"));
+    const review = screen.getByRole("dialog");
+    expect(review).toHaveTextContent(
+      "Only ZKsync Foundation Safe can send this transaction: the contract checks the sender."
+    );
+    expect(within(review).getByTestId("calldata")).toHaveTextContent(
+      `0xb75a2103${"ab".repeat(32)}`
+    );
+    expect(within(review).getByTestId("simulation-ok")).toBeInTheDocument();
+    expect(within(review).getByTestId("send-transaction")).toHaveTextContent(
+      "Create Safe transaction"
+    );
+    fireEvent.click(within(review).getByTestId("send-transaction"));
+    // The call as shown, proposed to the Safe: what comes back is its safeTxHash.
+    expect(walletSend.sendTransaction).toHaveBeenCalledWith(
+      { to: HANDLER, data: `0xb75a2103${"ab".repeat(32)}`, value: 0n },
+      expect.anything()
+    );
+    // The review closes and the row says where it is; nothing holds the page's updates meanwhile,
+    // so the step shows done once the Safe's owners execute it.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByTestId("safe-tx-created")).toBeNull();
+    expect(
+      within(screen.getByTestId("create-row-zkFoundation-approval")).getByTestId("safe-tx-in-safe")
+    ).toHaveTextContent(
+      `In ZKsync Foundation Safe (safeTxHash ${safeTxHash}). Once its owners execute it in Safe{Wallet}, this page shows it done.`
+    );
+  });
+
+  it("offers it to no other wallet, and to no one while the step is not open", () => {
+    // A Security Council member: its signature, never the ZK Foundation's call.
+    wallet.address = MEMBER_C;
+    const { unmount } = render(
+      <YourSignature hint="h" actions={councilOpen} safeCalls={[approval()]} />
+    );
+    expect(screen.getByTestId("sign-button")).toBeInTheDocument();
+    expect(screen.queryByTestId("review-create")).toBeNull();
+    unmount();
+
+    // No wallet: the note for visitors, no call.
+    wallet.address = undefined;
+    const visitor = render(
+      <YourSignature hint="h" actions={councilOpen} safeCalls={[approval()]} />
+    );
+    expect(screen.getByTestId("your-signature-note")).toBeInTheDocument();
+    expect(screen.queryByTestId("review-create")).toBeNull();
+    visitor.unmount();
+
+    // The ZK Foundation Safe, its step done or closed, and nothing else open: no panel at all.
+    wallet.address = ZK_FOUNDATION;
+    for (const state of [
+      { status: "done", detail: "Approved by the ZK Foundation", txHash: null },
+      { status: "closed", detail: "Only possible while the upgrade is Waiting" },
+    ]) {
+      const { container, unmount: done } = render(
+        <YourSignature hint="h" actions={[]} safeCalls={[approval(state)]} />
+      );
+      expect(container).toBeEmptyDOMElement();
+      done();
+    }
+  });
+
+  it("is the panel's one row when nothing else is open (the legal veto extension)", () => {
+    wallet.address = ZK_FOUNDATION;
+    render(
+      <YourSignature
+        hint="h"
+        actions={[]}
+        safeCalls={[
+          {
+            ...approval(),
+            key: "zkFoundation-legalVeto",
+            title: "Legal veto extension (ZK Foundation)",
+          },
+        ]}
+      />
+    );
+    expect(screen.getByTestId("your-signature")).toHaveTextContent("Your Safe's transaction");
+    expect(screen.getByTestId("create-row-zkFoundation-legalVeto")).toHaveTextContent(
+      "Legal veto extension (ZK Foundation)"
+    );
+  });
+});
+
+describe("Your signature: the Security Council's approval during the legal veto period", () => {
+  const met = {
+    ...(set as object),
+    valid: [
+      { signer: MEMBER_A, signature: "0xaa" },
+      { signer: MEMBER_B, signature: "0xbb" },
+    ],
+    thresholdCheck: { status: "met", checkedWith: "checkSignatures" },
+  } as never;
+
+  it("at its threshold, says when it can be sent and offers nothing to send before", () => {
+    render(
+      <YourSignature
+        hint="h"
+        actions={[
+          {
+            key: "council",
+            title: "Security Council approval",
+            set: met,
+            state: { status: "open" },
+            execution: null,
+            sendsAfter: 1_792_500_000,
+          },
+        ]}
+      />
+    );
+    expect(screen.getByTestId("your-signature")).toHaveTextContent("Threshold met");
+    expect(screen.getByTestId("later-row-council")).toHaveTextContent(
+      "Security Council approval · threshold metIt can be sent once the legal veto period ends, Oct 20, 2026, 12:40 UTC. Then anyone can send it: the contract checks the signatures, not the sender."
+    );
+    expect(screen.queryByTestId("review-send")).toBeNull();
+  });
+
+  it("below its threshold, members sign as in Waiting, and nothing is said about sending", () => {
+    wallet.address = MEMBER_C;
+    render(
+      <YourSignature
+        hint="h"
+        actions={[
+          {
+            key: "council",
+            title: "Security Council approval",
+            set,
+            state: { status: "open" },
+            execution: null,
+            sendsAfter: 1_792_500_000,
+          },
+        ]}
+      />
+    );
+    expect(screen.getByTestId("sign-button")).toBeInTheDocument();
+    expect(screen.queryByTestId("later-row-council")).toBeNull();
   });
 });

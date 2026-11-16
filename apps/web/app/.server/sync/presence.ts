@@ -299,7 +299,7 @@ export function onPageLoad(key: string) {
 
 /** While a key on ZKsync Era is on screen, the engine also follows Era. */
 export function isL2Key(key: string): boolean {
-  return key.startsWith("l2:") || key === "list:vetoes" || startableDaysOf(key) !== null;
+  return startableDaysOf(key) !== null;
 }
 
 /** The look-back of a start-page key (`list:startable`, `list:startable:<days>`), else null. */
@@ -315,13 +315,10 @@ export const watchKeys = {
     window === "45" ? "list:upgrades" : `list:upgrades:${window}`,
   emergencies: (all: boolean) => (all ? "list:emergency:all" : "list:emergency"),
   freezes: "list:freeze",
-  vetoes: "list:vetoes",
   /** The start page's list; another look-back than the default is a list of its own. */
   startable: (days: number = STARTABLE_DAYS) =>
     days === STARTABLE_DAYS ? "list:startable" : `list:startable:${days}`,
   upgrade: (id: string) => `upgrade:${id.toLowerCase()}`,
   emergency: (id: string) => `emergency:${id.toLowerCase()}`,
-  l2: (governor: string, proposalId: bigint | string) =>
-    `l2:${governor.toLowerCase()}:${proposalId.toString()}`,
   tx: (hash: string) => `tx:${hash.toLowerCase()}`,
 } as const;

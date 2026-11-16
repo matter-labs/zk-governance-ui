@@ -10,7 +10,6 @@ import { resetPresence } from "@/.server/sync/presence";
 import { loader as home } from "@/routes/_index/_route";
 import { loader as emergencyPage } from "@/routes/app/emergency/$id/_route";
 import { loader as emergencyList } from "@/routes/app/emergency/_index/_route";
-import { loader as vetoList } from "@/routes/app/l2-cancellations/_index/_route";
 import { loader as upgradePage } from "@/routes/app/proposals/$id/_route";
 import { loader as upgradeList } from "@/routes/app/proposals/_index/_route";
 import { emergencyExecution } from "@/common/execution";
@@ -41,8 +40,6 @@ type Key =
   | "pending"
   | "freshPending"
   | "freshExecuted"
-  | "signed"
-  | "freshSigned"
   | "upgrades"
   | "upgradesFresh";
 
@@ -81,7 +78,7 @@ const transaction = (hash: Hex) => ({
   hash,
   from: zeroAddress,
   to: L1.emergencyUpgradeBoard,
-  input: emergencyExecution(L1.emergencyUpgradeBoard, PROPOSAL, [], [], "0x01").data,
+  input: emergencyExecution(L1.emergencyUpgradeBoard, PROPOSAL, [], "0x01").data,
   value: "0x0",
   nonce: "0x0",
   gas: "0x0",
@@ -160,43 +157,36 @@ describe("pages after a pause", () => {
   it("the lists and the overview: as last shown at once, as of their block, then the current ones", async () => {
     const w = liveWorld();
     await backfilled();
-    // The four pages at once, as tabs opened together after the pause (one after another, the
+    // The three pages at once, as tabs opened together after the pause (one after another, the
     // later ones would find the head the first one read, and show the current data at once).
     const pages = () => ({
       home: open(home, "/"),
       upgrades: open(upgradeList, "/app/proposals?history=all"),
       emergency: open(emergencyList, "/app/emergency"),
-      vetoes: open(vetoList, "/app/l2-cancellations"),
     });
     const before = pages();
     const current = {
       upgrades: (await settle(before.upgrades.list)) as { upgrades: unknown[] },
       executed: (await settle(before.emergency.executed)) as { items: unknown[] },
-      signed: (await settle(before.vetoes.signed)) as { vetoes: unknown[] },
       count: (await settle(before.home.upgrades)) as { open: number; total: number },
     };
     expect(current.upgrades.upgrades.length).toBeGreaterThan(0);
     for (const value of Object.values(current)) expect(value).not.toHaveProperty("asOf");
     await settle(
-      Promise.all(
-        [before.home, before.emergency, before.vetoes].flatMap((data) => Object.values(data))
-      ).catch(() => {})
+      Promise.all([before.home, before.emergency].flatMap((data) => Object.values(data))).catch(
+        () => {}
+      )
     );
 
     await pause(w);
     const after = pages();
-    // Each with its block; the Safe-fed pending ids and vetoes also as from older copies (stale).
+    // Each with its block; the Safe-fed pending ids also as from older copies (stale).
     expect(await atOnce(after.upgrades.list)).toMatchObject({ ...current.upgrades, ...asOfHead });
     expect(await atOnce(after.emergency.executed)).toMatchObject({
       items: current.executed.items,
       ...asOfHead,
     });
     expect(await atOnce(after.emergency.pending)).toMatchObject({ stale: true, ...asOfHead });
-    expect(await atOnce(after.vetoes.signed)).toMatchObject({
-      vetoes: current.signed.vetoes,
-      stale: true,
-      ...asOfHead,
-    });
     expect(await atOnce(after.home.upgrades)).toMatchObject({
       open: current.count.open,
       total: current.count.total,
@@ -206,13 +196,11 @@ describe("pages after a pause", () => {
       upgrades: await settle(after.upgrades.freshList),
       executed: await settle(after.emergency.freshExecuted),
       pending: await settle(after.emergency.freshPending),
-      signed: await settle(after.vetoes.freshSigned),
       count: await settle(after.home.upgradesFresh),
     };
     expect(fresh.upgrades).toMatchObject({ upgrades: current.upgrades.upgrades });
     expect(fresh.executed).toMatchObject({ items: current.executed.items, fromLastRun: false });
     expect(fresh.pending).toMatchObject({ stale: false });
-    expect(fresh.signed).toMatchObject({ vetoes: current.signed.vetoes, stale: false });
     expect(fresh.count).toMatchObject({ source: null });
     for (const value of Object.values(fresh)) expect(value).not.toHaveProperty("asOf");
   });

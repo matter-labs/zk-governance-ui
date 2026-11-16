@@ -1,4 +1,4 @@
-import { guardiansAbi, isErc1271Accepted, safeAbi } from "@/common/abis";
+import { isErc1271Accepted, safeAbi, securityCouncilAbi } from "@/common/abis";
 import { type MemberSignature, encodeMultisigSignature, sortBySigner } from "@/common/execution";
 import { env } from "@config/env.server";
 import { defaultLogger } from "@config/log.server";
@@ -138,7 +138,7 @@ async function pinnedCheck(check: FastCheck, members: readonly Address[]): Promi
   const checks = await Promise.all([
     check.kind === "safe-1271"
       ? hasPinnedCode(check.contract, [pins.safeProxy])
-      : hasPinnedCode(check.contract, councilPins(pins, "securityCouncil", "guardians")),
+      : hasPinnedCode(check.contract, councilPins(pins, "securityCouncil")),
     ...members.map((member) => hasPinnedCode(member, [pins.safeProxy])),
   ]);
   return checks.every(Boolean);
@@ -160,7 +160,10 @@ function codeAt(contract: Address, head: BlockRef): Promise<boolean> {
     async () => {
       const result = await aggregateAt(head, {
         target: contract,
-        callData: encodeFunctionData({ abi: guardiansAbi, functionName: "EIP1271_THRESHOLD" }),
+        callData: encodeFunctionData({
+          abi: securityCouncilAbi,
+          functionName: "EIP1271_THRESHOLD",
+        }),
       });
       const present = wordOf(result) !== null;
       if (present) noteCodePresent(contract, head.hash);
@@ -237,7 +240,7 @@ export async function fastAccepts(
           target: check.contract,
           kind: "verdict",
           callData: encodeFunctionData({
-            abi: guardiansAbi,
+            abi: securityCouncilAbi,
             functionName: "checkSignatures",
             args: [
               digest,

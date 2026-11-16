@@ -163,7 +163,7 @@ export const PUH_TOPICS = {
   EmergencyUpgradeExecuted: selector("EmergencyUpgradeExecuted(bytes32)"),
   Unfreeze: selector("Unfreeze()"),
   ChangeSecurityCouncil: selector("ChangeSecurityCouncil(address,address)"),
-  ChangeGuardians: selector("ChangeGuardians(address,address)"),
+  ChangeZkFoundation: selector("ChangeZkFoundation(address,address)"),
   ChangeEmergencyUpgradeBoard: selector("ChangeEmergencyUpgradeBoard(address,address)"),
   // The handler is a proxy: its own events share the address.
   Upgraded: "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b" as Hex,
@@ -191,7 +191,7 @@ export function puhHistory(from: bigint, to: bigint): PuhHistory {
   kinds.push(() => ({ topics: [PUH_TOPICS.Initialized], data: word(1) }));
   kinds.push(() => ({ topics: [PUH_TOPICS.AdminChanged], data: `0x${"00".repeat(64)}` }));
   for (let i = 0; i < 3; i++) kinds.push(() => ({ topics: [PUH_TOPICS.Upgraded, word(0x1a + i)] }));
-  kinds.push(() => ({ topics: [PUH_TOPICS.ChangeGuardians, word(0), word(0x9a)] }));
+  kinds.push(() => ({ topics: [PUH_TOPICS.ChangeZkFoundation, word(0), word(0x9a)] }));
   for (let i = 0; i < 2; i++)
     kinds.push(() => ({ topics: [PUH_TOPICS.ChangeEmergencyUpgradeBoard, word(i), word(i + 1)] }));
   kinds.push(() => ({ topics: [PUH_TOPICS.ChangeSecurityCouncil, word(0xc0de), word(0xc0df)] }));

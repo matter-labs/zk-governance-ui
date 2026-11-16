@@ -62,7 +62,7 @@ function status(
       warnings: [],
       upgradeHandler: ADDRESS,
       securityCouncil: { address: ADDRESS, members: [] },
-      guardians: { address: ADDRESS, members: [] },
+      zkFoundation: ADDRESS,
       emergencyUpgradeBoard: { address: ADDRESS, zkFoundation: ADDRESS },
     },
     logHistory,

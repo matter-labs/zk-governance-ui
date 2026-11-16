@@ -1,10 +1,15 @@
-import { emergencyUpgradeBoardAbi, securityCouncilAbi } from "@/common/abis";
+import {
+  earlierEmergencyUpgradeBoardAbi,
+  emergencyUpgradeBoardAbi,
+  securityCouncilAbi,
+  upgradeHandlerAbi,
+} from "@/common/abis";
 import {
   approvalExecution,
-  cancelL2Execution,
   emergencyExecution,
   freezeExecution,
   sortBySigner,
+  zkFoundationCall,
 } from "@/common/execution";
 import {
   checkEmergencyPayload,
@@ -13,7 +18,14 @@ import {
   encodeUpgradeProposal,
   upgradeProposalId,
 } from "@/common/proposal";
-import { type Hex, decodeAbiParameters, decodeFunctionData, getAddress, parseAbi } from "viem";
+import {
+  type Hex,
+  decodeAbiParameters,
+  decodeFunctionData,
+  encodeFunctionData,
+  getAddress,
+  parseAbi,
+} from "viem";
 import { describe, expect, it } from "vitest";
 import {
   APPROVAL_TX,
@@ -46,7 +58,6 @@ describe("approval calldata", () => {
     const fromSafe = safeSignatures("ApproveUpgradeSecurityCouncil", UPGRADE_ID);
     expect(fromSafe).toHaveLength(7);
     const rebuilt = approvalExecution(
-      "ApproveUpgradeSecurityCouncil",
       MAINNET.securityCouncil,
       UPGRADE_ID,
       fromSafe.filter((s) => used.has(s.signer))
@@ -68,7 +79,8 @@ describe("approval calldata", () => {
 describe("emergency calldata", () => {
   const tx = TRANSACTIONS[EMERGENCY_TX];
   if (!tx) throw new Error("fixture missing");
-  const args = decodeFunctionData({ abi: emergencyUpgradeBoardAbi, data: tx.input })
+  // Executed before ZIP-19, through the three-party board of the time (the Guardians' blob first).
+  const args = decodeFunctionData({ abi: earlierEmergencyUpgradeBoardAbi, data: tx.input })
     .args as unknown as readonly [
     readonly { target: Hex; value: bigint; data: Hex }[],
     Hex,
@@ -76,7 +88,7 @@ describe("emergency calldata", () => {
     Hex,
     Hex,
   ];
-  const [calls, salt] = args;
+  const [calls, salt, , councilBlob, foundationSignature] = args;
   const payload = {
     salt,
     calls: calls.map((c) => ({ target: c.target, value: c.value.toString(), data: c.data })),
@@ -91,26 +103,29 @@ describe("emergency calldata", () => {
     const check = checkEmergencyPayload(payload, EMERGENCY_ID, MAINNET.emergencyUpgradeBoard);
     if (!check.ok) throw new Error(check.error);
     const council = safeSignatures("ExecuteEmergencyUpgradeSecurityCouncil", EMERGENCY_ID);
-    const guardians = safeSignatures("ExecuteEmergencyUpgradeGuardians", EMERGENCY_ID);
     const [foundation] = safeSignatures("ExecuteEmergencyUpgradeZKFoundation", EMERGENCY_ID);
     if (!foundation) throw new Error("fixture missing");
     // Only the signers the executor used (Safe may hold more).
-    const usedOf = (blob: Hex) =>
-      new Set(
-        decodeAbiParameters([{ type: "address[]" }, { type: "bytes[]" }], blob)[0].map((a) =>
-          getAddress(a)
-        )
-      );
-    const usedGuardians = usedOf(args[2]);
-    const usedCouncil = usedOf(args[3]);
+    const used = new Set(
+      decodeAbiParameters([{ type: "address[]" }, { type: "bytes[]" }], councilBlob)[0].map((a) =>
+        getAddress(a)
+      )
+    );
     const rebuilt = emergencyExecution(
       MAINNET.emergencyUpgradeBoard,
       check.proposal,
-      guardians.filter((g) => usedGuardians.has(g.signer)),
-      council.filter((c) => usedCouncil.has(c.signer)),
+      council.filter((c) => used.has(c.signer)),
       foundation.signature
     );
-    expect(rebuilt.data).toBe(tx.input);
+    // Today's two-party board takes the same calls, salt and signatures, without the Guardians' blob.
+    expect(rebuilt.to).toBe(MAINNET.emergencyUpgradeBoard);
+    expect(rebuilt.data).toBe(
+      encodeFunctionData({
+        abi: emergencyUpgradeBoardAbi,
+        functionName: "executeEmergencyUpgrade",
+        args: [calls, salt, councilBlob, foundationSignature],
+      })
+    );
   });
 
   it("rejects a payload that does not hash to the signed id, or names another executor", () => {
@@ -170,7 +185,7 @@ describe("proposal encoding", () => {
   });
 });
 
-describe("freeze and veto calldata", () => {
+describe("freeze and ZK Foundation calldata", () => {
   const sigs = [
     { signer: getAddress("0x34Ea62D4b9bBB8AD927eFB6ab31E3Ab3474aC93a"), signature: "0xaa" as Hex },
   ];
@@ -196,20 +211,14 @@ describe("freeze and veto calldata", () => {
     ).toEqual([2n, 1n]);
   });
 
-  it("sends txMintValue with the veto", () => {
-    const veto = cancelL2Execution(
-      MAINNET.guardians,
-      { targets: [MAINNET.guardians], values: ["0"], calldatas: ["0x"], description: "d" },
-      {
-        to: getAddress("0xb83FF6501214ddF40C91C9565d095400f3F45746"),
-        l2GasLimit: "30000000",
-        l2GasPerPubdataByteLimit: "800",
-        refundRecipient: MAINNET.guardians,
-        txMintValue: "20000000000000000",
-      },
-      sigs
-    );
-    expect(veto.value).toBe("20000000000000000");
-    expect(veto.functionName).toBe("cancelL2GovernorProposal");
+  it("calls the handler with the id alone, from the ZK Foundation's own Safe (no signatures)", () => {
+    for (const functionName of ["approveUpgradeZkFoundation", "extendLegalVeto"] as const) {
+      const call = zkFoundationCall(MAINNET.upgradeHandler, functionName, UPGRADE_ID);
+      expect(call).toMatchObject({ to: MAINNET.upgradeHandler, value: "0", functionName });
+      expect(decodeFunctionData({ abi: upgradeHandlerAbi, data: call.data })).toEqual({
+        functionName,
+        args: [UPGRADE_ID],
+      });
+    }
   });
 });

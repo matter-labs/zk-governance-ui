@@ -84,7 +84,7 @@ describe("Prepared in this browser", () => {
     ({
       id,
       executed: null,
-      reported: { securityCouncil: 3, guardians: 1, zkFoundation: false },
+      reported: { securityCouncil: 3, zkFoundation: false },
       firstSeen: null,
       ...extra,
     }) as never;
@@ -115,7 +115,7 @@ describe("Prepared in this browser", () => {
       />
     );
     const status = (i: number) => within(rows()[i] as HTMLElement).getByTestId("prepared-status");
-    expect(status(0)).toHaveTextContent("Security Council 3Guardians 1Foundation pending");
+    expect(status(0)).toHaveTextContent("Security Council 3Foundation pending");
     expect(status(1)).toHaveTextContent("No signatures pending in members' Safes");
     expect(status(2)).toHaveTextContent("Executed");
   });

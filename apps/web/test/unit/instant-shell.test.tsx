@@ -73,7 +73,6 @@ vi.mock("@/.server/flows/emergency", () => ({
   loadEmergencyUpgrade: vi.fn(),
 }));
 vi.mock("@/.server/flows/freeze", () => ({ loadFreezeList: vi.fn() }));
-vi.mock("@/.server/flows/l2-veto", () => ({ loadL2VetoList: vi.fn() }));
 vi.mock("@/.server/flows/emergency-draft", () => ({ checkDraftCalls: vi.fn() }));
 vi.mock("@/.server/flows/common", () => ({ freshAfter: vi.fn() }));
 vi.mock("@/.server/governance", () => ({ governance: vi.fn() }));
@@ -127,13 +126,7 @@ function okStatus(
         eip1271Threshold: 9,
         thresholds: {},
       },
-      guardians: {
-        address: ADDRESS,
-        members: [ADDRESS],
-        eip1271Threshold: 5,
-        thresholds: { cancelL2Proposal: 5 },
-        nonce: "3",
-      },
+      zkFoundation: ADDRESS,
       emergencyUpgradeBoard: { address: ADDRESS, zkFoundation: ADDRESS },
     },
     logHistory: { status: "ok" },
@@ -197,11 +190,12 @@ describe("the app shell before the status is read", () => {
       "Protocol upgrades",
       "Emergency upgrades",
       "Freeze requests",
-      "Guardian veto",
       // Settings: the toggle floating at the bottom right.
       "Open settings",
     ])
       expect(out).toContain(`aria-label="${item}"`);
+    // No Guardian veto since ZIP-19 (the ZK Foundation vetoes from its own Safe on Era).
+    expect(out).not.toContain("Guardian veto");
     expect(out).toContain("page body");
     expect(out).toContain("Ethereum Mainnet");
     expect(out).toContain("checking…");
@@ -285,7 +279,9 @@ describe("the app shell once the status is read", () => {
     expect(screen.getByTestId("status-checking")).toHaveTextContent("checking…");
     expect(screen.getByTestId("page-pending")).toBeInTheDocument();
 
-    await act(async () => status.resolve(okStatus({ warnings: ["Guardians disagree"] })));
+    await act(async () =>
+      status.resolve(okStatus({ warnings: ["The handler and the board disagree"] }))
+    );
     expect(screen.queryByTestId("status-checking-banner")).not.toBeInTheDocument();
     expect(screen.queryByTestId("status-checking")).not.toBeInTheDocument();
     expect(screen.getByTestId("block-age")).toHaveTextContent("block #21,000,064");
@@ -339,13 +335,13 @@ describe("each page's first flush, before its data and the status are read", () 
       upgrades: pending(),
       emergency: pending(),
       freeze: pending(),
-      vetoes: pending(),
     });
     expect(out).not.toContain("PAGE WAITED");
     expect(out).toContain("Governance review");
     expect(out).toContain("Open a proposal by ID");
-    for (const flow of ["flow-upgrades", "flow-emergency", "flow-freeze", "flow-veto"])
+    for (const flow of ["flow-upgrades", "flow-emergency", "flow-freeze"])
       expect(out).toContain(`data-testid="${flow}"`);
+    expect(out).not.toContain('data-testid="flow-veto"');
     expect(out).toContain("Reading sources…");
   });
 
@@ -388,24 +384,6 @@ describe("each page's first flush, before its data and the status are read", () 
     expect(out).not.toContain("PAGE WAITED");
     expect(out).toContain(ID);
     expect(out).toContain("Reading the emergency upgrade status from L1");
-  });
-
-  it("/app/l2-cancellations: the header without the threshold yet, and each list's loading state", async () => {
-    const { default: Vetoes } = await import("@/routes/app/l2-cancellations/_index/_route");
-    const out = firstFlush(Vetoes, {
-      signed: pending(),
-      freshSigned: pending(),
-      vetoable: pending(),
-      freshVetoable: pending(),
-    });
-    expect(out).not.toContain("PAGE WAITED");
-    expect(out).toContain("Guardian veto");
-    expect(out).toContain("Guardians can cancel a proposal");
-    expect(out).toContain('id="signed-vetoes-heading"');
-    expect(out).toContain('id="vetoable-heading"');
-    expect(out).toContain("Collecting vetoes from Guardian Safes");
-    expect(out).toContain("Reading active proposals from ZKsync Era governors");
-    expect(out).not.toContain("Next nonce");
   });
 
   it("/app/freeze: the header, the facts and the list's loading state, without thresholds yet", async () => {

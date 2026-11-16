@@ -62,7 +62,7 @@ const engineOf = (options: LimitedHttpOptions, limit: ReturnType<typeof concurre
 });
 
 // No client follows a contract's OffchainLookup revert (CCIP-read, EIP-3668): a crafted link to
-// such a contract (a veto page's governor) would make the app fetch URLs that contract picks.
+// such a contract would make the app fetch URLs that contract picks.
 const readClient = (transport: Transport) => createPublicClient({ transport, ccipRead: false });
 
 let l1Limit = concurrencyLimit(L1_TRANSPORT.maxInFlight);
@@ -197,16 +197,6 @@ export function network(): Promise<Network> {
           "ZK_PROTOCOL_GOVERNOR_ADDRESS",
           env.ZK_PROTOCOL_GOVERNOR_ADDRESS,
           base.l2Governors.protocol
-        ),
-        token: override(
-          "ZK_TOKEN_GOVERNOR_ADDRESS",
-          env.ZK_TOKEN_GOVERNOR_ADDRESS,
-          base.l2Governors.token
-        ),
-        govOps: override(
-          "ZK_GOV_OPS_GOVERNOR_ADDRESS",
-          env.ZK_GOV_OPS_GOVERNOR_ADDRESS,
-          base.l2Governors.govOps
         ),
       },
       isDevNode,

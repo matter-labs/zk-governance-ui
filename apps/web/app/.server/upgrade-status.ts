@@ -13,8 +13,10 @@ import { type BlockRef, type Network, l1State, latestBlock, network } from "./rp
 export type UpgradeStatus = {
   creationTimestamp: number;
   securityCouncilApprovalTimestamp: number;
-  guardiansApproval: boolean;
-  guardiansExtendedLegalVeto: boolean;
+  /** Approved by the ZK Foundation (its Safe called approveUpgradeZkFoundation). */
+  zkFoundationApproval: boolean;
+  /** The ZK Foundation extended the legal veto period to 7 days. */
+  zkFoundationExtendedLegalVeto: boolean;
   executed: boolean;
 };
 
@@ -101,8 +103,8 @@ function shapeStatus(
     status: {
       creationTimestamp: raw[0],
       securityCouncilApprovalTimestamp: raw[1],
-      guardiansApproval: raw[2],
-      guardiansExtendedLegalVeto: raw[3],
+      zkFoundationApproval: raw[2],
+      zkFoundationExtendedLegalVeto: raw[3],
       executed: raw[4],
     },
   };

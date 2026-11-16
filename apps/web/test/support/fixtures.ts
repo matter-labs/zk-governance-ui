@@ -29,10 +29,11 @@ export const TRANSACTIONS = transactions as Record<
   { to: string; input: Hex; blockNumber: string }
 >;
 
+// The contracts the recorded data went through (before v31 and ZIP-19): the Security Council and
+// the Emergency Upgrade Board of the time (a board that also took the Guardians' signatures).
 export const MAINNET = {
   upgradeHandler: "0xE30Dca3047B37dc7d88849dE4A4Dc07937ad5Ab3",
   securityCouncil: "0x59195219d1176E42f8e607e9AC114926D47f9035",
-  guardians: "0x600dA620Ab29F41ABC6596a15981e14cE58c86b8",
   emergencyUpgradeBoard: "0xF73a7dCfa68E52030ec39E41a23DCA51F3aAa111",
   zkFoundation: "0xbC1653bd3829dfEc575AfC3816D4899cd103B51c",
 } as const;

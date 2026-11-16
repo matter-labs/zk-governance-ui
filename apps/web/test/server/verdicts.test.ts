@@ -10,14 +10,7 @@ import { resetPresence } from "@/.server/sync/presence";
 import { type Hex, getAddress, numberToHex } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeRpcError } from "../support/fake-jsonrpc";
-import {
-  FAKE_PINS,
-  type FakeL1Options,
-  G_MEMBERS,
-  L1,
-  RawAnswer,
-  SC_MEMBERS,
-} from "../support/fake-l1";
+import { FAKE_PINS, type FakeL1Options, L1, RawAnswer, SC_MEMBERS } from "../support/fake-l1";
 import { NOW, ecdsa, liveWorld, settle } from "../support/live-world";
 
 // The verdict fast path (chain/verdicts.ts): a set's checks at a head go out in the head's
@@ -50,8 +43,8 @@ const calls = (w: World, functionName: string, viaMulticall: boolean) =>
   w.fake.calls.filter((c) => c.functionName === functionName && c.viaMulticall === viaMulticall);
 
 const council = (w: World) => w.sets[0] as SignatureSetParams;
-const zkFoundation = (w: World) => w.sets[5] as SignatureSetParams;
-const emergencyCouncil = (w: World) => w.sets[3] as SignatureSetParams;
+const zkFoundation = (w: World) => w.sets[2] as SignatureSetParams;
+const emergencyCouncil = (w: World) => w.sets[1] as SignatureSetParams;
 
 /** A world with one option replaced (the rest as liveWorld's). */
 const world = (options: Omit<FakeL1Options, "head" | "logs" | "upgrades"> = {}) =>
@@ -236,9 +229,17 @@ describe("S-26: never through the aggregate", () => {
     const set = await settle(verifySignatureSet(council(w)));
     expect(set.thresholdCheck.status).toBe("met");
     expect(calls(w, "checkSignatures", true).some((c) => c.to === L1.securityCouncil)).toBe(false);
-    const guardians = await settle(verifySignatureSet(w.sets[1] as SignatureSetParams));
-    expect(guardians.thresholdCheck.status).toBe("met");
-    expect(calls(w, "checkSignatures", true).filter((c) => c.to === L1.guardians)).toHaveLength(3);
+    const emergency = await settle(verifySignatureSet(emergencyCouncil(w)));
+    expect(emergency.thresholdCheck.status).toBe("met");
+    expect(calls(w, "isValidSignature", true).some((c) => c.to === L1.securityCouncil)).toBe(false);
+    // The ZK Foundation Safe runs the pinned proxy: its checks (its own and the threshold's) still
+    // go through the aggregate.
+    const zkf = await settle(verifySignatureSet(zkFoundation(w)));
+    expect(zkf.thresholdCheck.status).toBe("met");
+    expect(calls(w, "isValidSignature", true).filter((c) => c.to === L1.zkFoundation)).toHaveLength(
+      2
+    );
+    expect(calls(w, "isValidSignature", false).some((c) => c.to === L1.zkFoundation)).toBe(false);
   });
 });
 
@@ -328,13 +329,10 @@ describe("S-19: only positives come from the aggregate", () => {
   it("SYNC_VERDICT_AGGREGATE=0's path (the fast path resting) asks everything directly", async () => {
     const w = world({ aggregateError: () => new FakeRpcError(-32000, "out of gas") });
     // Three whole-call failures in a row: the fast path rests (every check direct for a while).
-    for (const set of [council(w), w.sets[1], w.sets[3]] as SignatureSetParams[])
-      await settle(verifySignatureSet(set));
+    for (const set of w.sets) await settle(verifySignatureSet(set));
     const before = w.fake.multicalls.length;
     clearCache();
-    await settle(
-      verifySignatureSet(G_MEMBERS.length ? (w.sets[4] as SignatureSetParams) : council(w))
-    );
+    await settle(verifySignatureSet(emergencyCouncil(w)));
     // Only Safe info and states may still use aggregates; no verdict sub-call was sent.
     expect(
       w.fake.aggregates
@@ -383,15 +381,15 @@ describe("the fast path's breaker: 3 failed aggregate3 calls in a row", () => {
     const { w, failing } = failingWorld();
     const head = await warmThenNextHead(w);
     failing.count = 1;
-    const guardians = await settle(verifySignatureSet(w.sets[1] as SignatureSetParams));
-    expect(guardians.thresholdCheck.status).toBe("met");
+    const approval = await settle(verifySignatureSet(council(w)));
+    expect(approval.thresholdCheck.status).toBe("met");
     expect(failing.count).toBe(0);
     // That one aggregate carried the members' checks and the threshold check's guess: each was
     // asked again directly.
     expect(verdictCounts(head.number.toString()).reasked).toBeGreaterThanOrEqual(3);
     await nextHead(w);
     const before = w.fake.aggregates.length;
-    const emergency = await settle(verifySignatureSet(w.sets[4] as SignatureSetParams));
+    const emergency = await settle(verifySignatureSet(emergencyCouncil(w)));
     expect(emergency.thresholdCheck.status).toBe("met");
     expect(verdictsSince(w, before)).toBe(true);
   });
@@ -400,18 +398,18 @@ describe("the fast path's breaker: 3 failed aggregate3 calls in a row", () => {
     const { w, failing } = failingWorld();
     await warmThenNextHead(w);
     failing.count = 2;
-    for (const set of [w.sets[1], w.sets[3]] as SignatureSetParams[])
-      await settle(verifySignatureSet(set));
+    for (const set of [council(w), emergencyCouncil(w)]) await settle(verifySignatureSet(set));
     expect(failing.count).toBe(0);
     let before = w.fake.aggregates.length;
-    await settle(verifySignatureSet(w.sets[4] as SignatureSetParams));
+    await settle(verifySignatureSet(zkFoundation(w)));
     expect(verdictsSince(w, before)).toBe(true);
 
     await nextHead(w);
     failing.count = 3;
-    for (const set of [w.sets[1], w.sets[3], w.sets[4]] as SignatureSetParams[])
-      await settle(verifySignatureSet(set));
+    for (const set of w.sets) await settle(verifySignatureSet(set));
     expect(failing.count).toBe(0);
+    // Resting: at the next head the sets' checks are all direct.
+    await nextHead(w);
     before = w.fake.aggregates.length;
     const zkf = await settle(verifySignatureSet(zkFoundation(w)));
     expect(zkf.thresholdCheck.status).toBe("met");

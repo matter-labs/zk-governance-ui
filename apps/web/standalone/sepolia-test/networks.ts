@@ -11,7 +11,6 @@ declare const __SEPOLIA_TEST_DEPLOYMENT__: {
   contracts: { protocolUpgradeHandler: Address };
   codeHashes: {
     securityCouncil: Hex;
-    guardians: Hex;
     emergencyUpgradeBoard: Hex;
     safeProxy: Hex;
   };
@@ -37,7 +36,9 @@ NETWORKS[11155111] = {
   },
   // Read from the deployment (its Safes are Safe 1.3.0, as on mainnet).
   codePins: {
-    ...deployment.codeHashes,
+    securityCouncil: deployment.codeHashes.securityCouncil,
+    emergencyUpgradeBoard: deployment.codeHashes.emergencyUpgradeBoard,
+    safeProxy: deployment.codeHashes.safeProxy,
     safeSingleton: "0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552",
     safeFallbackHandler: "0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4",
   },

@@ -110,9 +110,9 @@ export default function EmergencyList() {
       >
         <p className="max-w-[600px] text-[14px] text-slate-550">
           {/* The thresholds come from the root status; the rest of the page does not wait for it. */}
-          <WithStatus fallback="An emergency upgrade runs immediately once enough Security Council members, Guardians and the ZKsync Foundation have signed its id.">
+          <WithStatus fallback="An emergency upgrade runs immediately once enough Security Council members and the ZKsync Foundation have signed its id.">
             {({ governance }) =>
-              `An emergency upgrade runs immediately once ${governance.securityCouncil.eip1271Threshold} of ${governance.securityCouncil.members.length} Security Council members, ${governance.guardians.eip1271Threshold} of ${governance.guardians.members.length} Guardians and the ZKsync Foundation have signed its id.`
+              `An emergency upgrade runs immediately once ${governance.securityCouncil.eip1271Threshold} of ${governance.securityCouncil.members.length} Security Council members and the ZKsync Foundation have signed its id.`
             }
           </WithStatus>{" "}
           Members sign only the id: the calls and salt come from the proposer, and this app checks
@@ -386,7 +386,6 @@ function Rows({
                 title="As reported by Safe; open the upgrade to verify each signature on-chain"
               >
                 <Badge>Security Council {e.reported.securityCouncil}</Badge>
-                <Badge>Guardians {e.reported.guardians}</Badge>
                 <Badge>
                   {e.reported.zkFoundation ? "Foundation signed" : "Foundation pending"}
                 </Badge>

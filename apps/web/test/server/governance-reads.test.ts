@@ -1,7 +1,7 @@
 import { clearCache } from "@/.server/cache";
 import { UpstreamError } from "@/.server/chain/call";
 import type { Lane } from "@/.server/chain/jsonrpc";
-import { emergencyUpgradeBoardAbi, guardiansAbi, safeAbi, securityCouncilAbi } from "@/common/abis";
+import { emergencyUpgradeBoardAbi, safeAbi, securityCouncilAbi } from "@/common/abis";
 import { safeMessageHashes } from "@/common/safe";
 import { type Address, getAddress, zeroHash } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,7 +21,6 @@ import { FakeRpcError } from "../support/fake-jsonrpc";
 
 const PUH = getAddress("0xE30Dca3047B37dc7d88849dE4A4Dc07937ad5Ab3");
 const SC = getAddress("0x59195219d1176E42f8e607e9AC114926D47f9035");
-const G = getAddress("0x600dA620Ab29F41ABC6596a15981e14cE58c86b8");
 const EUB = getAddress("0xF73a7dCfa68E52030ec39E41a23DCA51F3aAa111");
 const ZKF = getAddress("0xbC1653bd3829dfEc575AfC3816D4899cd103B51c");
 const member = (group: number, i: number) =>
@@ -47,7 +46,7 @@ function onchain(address: Address, functionName: string, args: readonly unknown[
   const values: Record<string, Record<string, unknown>> = {
     [PUH]: {
       securityCouncil: SC,
-      guardians: G,
+      zkFoundation: ZKF,
       emergencyUpgradeBoard: EUB,
       protocolFrozenUntil: 0n,
       lastFreezeStatusInUpgradeCycle: 0,
@@ -66,19 +65,9 @@ function onchain(address: Address, functionName: string, args: readonly unknown[
       PROTOCOL_UPGRADE_HANDLER: PUH,
       eip712Domain: domain("SecurityCouncil"),
     },
-    [G]: {
-      EIP1271_THRESHOLD: 5n,
-      APPROVE_UPGRADE_GUARDIANS_THRESHOLD: 5n,
-      EXTEND_LEGAL_VETO_THRESHOLD: 2n,
-      CANCEL_L2_GOVERNOR_PROPOSAL_THRESHOLD: 5n,
-      nonce: 0n,
-      PROTOCOL_UPGRADE_HANDLER: PUH,
-      eip712Domain: domain("Guardians"),
-    },
     [EUB]: {
       ZK_FOUNDATION_SAFE: ZKF,
       SECURITY_COUNCIL: SC,
-      GUARDIANS: G,
       PROTOCOL_UPGRADE_HANDLER: PUH,
       eip712Domain: domain("EmergencyUpgradeBoard"),
     },
@@ -86,7 +75,7 @@ function onchain(address: Address, functionName: string, args: readonly unknown[
   if (functionName === "members") {
     const index = Number(args[0]);
     const count = state.memberCount.get(address) ?? 0;
-    return index < count ? member(address === SC ? 0xa : 0xb, index) : REVERT;
+    return index < count ? member(0xa, index) : REVERT;
   }
   const safe: Record<string, unknown> = {
     VERSION: "1.4.1",
@@ -154,17 +143,14 @@ function direct(call: ContractCall): unknown {
 
 beforeEach(() => {
   clearCache();
-  state.memberCount = new Map([
-    [SC, 3],
-    [G, 2],
-  ]);
+  state.memberCount = new Map([[SC, 3]]);
   state.multicallFails.clear();
   state.direct.clear();
   state.missing.clear();
   state.directReads = [];
   state.lane = fakeCallLane(
     contracts({
-      abis: [securityCouncilAbi, guardiansAbi, emergencyUpgradeBoardAbi, safeAbi],
+      abis: [securityCouncilAbi, emergencyUpgradeBoardAbi, safeAbi],
       call: direct,
     })
   ).lane;
@@ -174,12 +160,11 @@ describe("member lists", () => {
   it("end where members(i) definitely reverts (Panic 0x32), confirmed directly", async () => {
     const gov = await governance();
     expect(gov.securityCouncil.members).toEqual([0, 1, 2].map((i) => member(0xa, i)));
-    expect(gov.guardians.members).toEqual([0, 1].map((i) => member(0xb, i)));
     expect(gov.warnings).toEqual([]);
-    // Only the first failed Multicall3 read of each list was asked again directly: past the
-    // end every read fails, and one definite revert is enough.
+    // Only the first failed Multicall3 read of the list was asked again directly: past the end
+    // every read fails, and one definite revert is enough.
     const memberReads = state.directReads.filter((read) => read.includes(":members:"));
-    expect(memberReads.sort()).toEqual([`${SC}:members:3`, `${G}:members:2`].sort());
+    expect(memberReads).toEqual([`${SC}:members:3`]);
   });
 
   it("keep a member whose Multicall3 read failed (e.g. out of gas) but whose direct read answers", async () => {
@@ -191,7 +176,7 @@ describe("member lists", () => {
 
   it.each([
     ["a member's direct read fails", `${SC}:members:1`, true],
-    ["the read past the end fails instead of reverting", `${G}:members:2`, false],
+    ["the read past the end fails instead of reverting", `${SC}:members:3`, false],
   ])("fail instead of shortening the list when %s (-32603)", async (_, key, viaMulticall) => {
     state.direct.set(key, internalError());
     if (viaMulticall) state.multicallFails.add(key);
@@ -221,9 +206,9 @@ describe("eip712Domain()", () => {
   });
 
   it("reads the domain directly when only the Multicall3 read failed", async () => {
-    state.multicallFails.add(`${G}:eip712Domain`);
+    state.multicallFails.add(`${EUB}:eip712Domain`);
     const gov = await governance();
-    expect(gov.guardians.domain.name).toBe("Guardians");
+    expect(gov.emergencyUpgradeBoard.domain.name).toBe("EmergencyUpgradeBoard");
     expect(gov.warnings).toEqual([]);
   });
 });

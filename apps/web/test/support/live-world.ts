@@ -14,14 +14,7 @@ import { UPGRADE_STATES } from "@/common/upgrade-states";
 import { type Address, type Hex, numberToHex, pad, zeroAddress } from "viem";
 import { vi } from "vitest";
 import { blockHash, puhHistory } from "./fake-chain";
-import {
-  type FakeL1Options,
-  G_MEMBERS,
-  L1,
-  SC_MEMBERS,
-  type UpgradeOnChain,
-  fakeL1,
-} from "./fake-l1";
+import { type FakeL1Options, L1, SC_MEMBERS, type UpgradeOnChain, fakeL1 } from "./fake-l1";
 
 export const NOW = 1_800_000_000_000;
 export const HEAD = 26_129_107n;
@@ -78,7 +71,6 @@ const SC_DOMAIN = {
   chainId: 1,
   verifyingContract: L1.securityCouncil,
 };
-const G_DOMAIN = { name: "Guardians", version: "1", chainId: 1, verifyingContract: L1.guardians };
 export const EUB_DOMAIN = {
   name: "EmergencyUpgradeBoard",
   version: "1",
@@ -101,7 +93,7 @@ type SetSpec = {
 export type LiveWorld = ReturnType<typeof liveWorld>;
 
 /**
- * The world: `upgradeId`/`emergencyId` are executed, `sets` the six signature sets their pages
+ * The world: `upgradeId`/`emergencyId` are executed, `sets` the three signature sets their pages
  * show (all done), and `nextBlock()` makes a new head 12 s after the last, 'finalized' with it.
  */
 export function liveWorld(options: Omit<FakeL1Options, "head" | "logs" | "upgrades"> = {}) {
@@ -142,26 +134,6 @@ export function liveWorld(options: Omit<FakeL1Options, "head" | "logs" | "upgrad
       signed: SC_MEMBERS.slice(0, 2),
     },
     {
-      action: "ApproveUpgradeGuardians",
-      group: "guardians",
-      domain: G_DOMAIN,
-      id: upgradeId,
-      members: G_MEMBERS,
-      threshold: 2,
-      check: { kind: "multisig", contract: L1.guardians },
-      signed: G_MEMBERS.slice(0, 2),
-    },
-    {
-      action: "ExtendLegalVetoPeriod",
-      group: "guardians",
-      domain: G_DOMAIN,
-      id: upgradeId,
-      members: G_MEMBERS,
-      threshold: 1,
-      check: { kind: "multisig", contract: L1.guardians },
-      signed: [],
-    },
-    {
       action: "ExecuteEmergencyUpgradeSecurityCouncil",
       group: "securityCouncil",
       domain: EUB_DOMAIN,
@@ -170,16 +142,6 @@ export function liveWorld(options: Omit<FakeL1Options, "head" | "logs" | "upgrad
       threshold: 2,
       check: { kind: "multisig-1271", contract: L1.securityCouncil },
       signed: SC_MEMBERS.slice(0, 2),
-    },
-    {
-      action: "ExecuteEmergencyUpgradeGuardians",
-      group: "guardians",
-      domain: EUB_DOMAIN,
-      id: emergencyId,
-      members: G_MEMBERS,
-      threshold: 2,
-      check: { kind: "multisig-1271", contract: L1.guardians },
-      signed: G_MEMBERS.slice(1, 3),
     },
     {
       action: "ExecuteEmergencyUpgradeZKFoundation",

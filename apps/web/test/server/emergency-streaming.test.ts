@@ -62,7 +62,6 @@ vi.mock("@/.server/governance", () => ({
     network: { isDevNode: true },
     upgradeHandler: MAINNET.upgradeHandler,
     securityCouncil: { address: MAINNET.securityCouncil, members: [], eip1271Threshold: 5 },
-    guardians: { address: MAINNET.guardians, members: [], eip1271Threshold: 5 },
     emergencyUpgradeBoard: {
       address: MAINNET.emergencyUpgradeBoard,
       zkFoundation: MAINNET.zkFoundation,
@@ -257,15 +256,16 @@ it("rebuilds calls and verifies original signatures before current Safe checks f
     complete = true;
   });
   const execution = await loading.executed;
-  expect(execution).toMatchObject({ txHash: EMERGENCY_TX, idMatches: true });
+  // Sent to the three-party board from before ZIP-19: its Guardians' signatures are not read.
+  expect(execution).toMatchObject({ txHash: EMERGENCY_TX, idMatches: true, beforeZip19: true });
+  expect(execution?.historical?.checks.map((c) => c.role)).toEqual([
+    "Security Council",
+    "ZKsync Foundation",
+  ]);
   expect(execution?.historical?.checks.every((c) => c.accepted === true)).toBe(true);
-  expect(state.checks).toHaveLength(3);
+  expect(state.checks).toHaveLength(2);
   expect(state.checks.every((c) => c.blockNumber === 25_766_163n)).toBe(true);
-  const actions = [
-    "ExecuteEmergencyUpgradeSecurityCouncil",
-    "ExecuteEmergencyUpgradeGuardians",
-    "ExecuteEmergencyUpgradeZKFoundation",
-  ];
+  const actions = ["ExecuteEmergencyUpgradeSecurityCouncil", "ExecuteEmergencyUpgradeZKFoundation"];
   expect(state.checks.map((c) => c.args[0])).toEqual(
     actions.map(
       (action) =>
@@ -285,12 +285,12 @@ it("keeps JSON waiting for Safe comparisons and preserves the completed response
     complete = true;
     return d;
   });
-  await vi.waitFor(() => expect(state.checks).toHaveLength(3));
+  await vi.waitFor(() => expect(state.checks).toHaveLength(2));
   expect(complete).toBe(false);
   release();
   const detail = await full;
   expect(detail.executed?.idMatches).toBe(true);
-  expect(detail.roles).toHaveLength(3);
+  expect(detail.roles.map((role) => role.key)).toEqual(["securityCouncil", "zkFoundation"]);
   for (const role of detail.roles) {
     expect(role.used?.length).toBeGreaterThan(0);
     expect(role.used?.every((used) => used.matchesSafe === true)).toBe(true);
@@ -302,18 +302,18 @@ it("keeps an RPC failure in a historical check unknown, and only a revert false"
   state.historical = new UpstreamError("internal error (JSON-RPC error -32603)");
   const failed = await (await loadEmergencyUpgrade(EMERGENCY_ID)).executed;
   expect(failed?.historical?.checks.map((c) => [c.accepted, c.error])).toEqual(
-    Array(3).fill([null, "internal error (JSON-RPC error -32603)"])
+    Array(2).fill([null, "internal error (JSON-RPC error -32603)"])
   );
   // Not kept: the next view asks again and gets the definite answer.
   state.historical = new CallReverted("GS026", "0x", 3);
   const reverted = await (await loadEmergencyUpgrade(EMERGENCY_ID)).executed;
   expect(reverted?.historical?.checks.map((c) => [c.accepted, c.error])).toEqual(
-    Array(3).fill([false, "GS026"])
+    Array(2).fill([false, "GS026"])
   );
-  expect(state.checks).toHaveLength(6);
+  expect(state.checks).toHaveLength(4);
   // A definite answer at a final block is kept for good.
   await (await loadEmergencyUpgrade(EMERGENCY_ID)).executed;
-  expect(state.checks).toHaveLength(6);
+  expect(state.checks).toHaveLength(4);
   release();
 });
 
@@ -384,18 +384,18 @@ it("keys the kept checks by the block they ran at: a reorged execution is checke
   state.eventBlock = F + 1n;
   const first = await (await loadEmergencyUpgrade(EMERGENCY_ID)).executed;
   expect(first?.historical?.block).toBe(F.toString());
-  expect(state.checks.map((c) => c.blockNumber)).toEqual([F, F, F]);
+  expect(state.checks.map((c) => c.blockNumber)).toEqual([F, F]);
   // A reorg moves the same transaction to F + 3: checked at F + 2, never answered from F.
   state.eventBlock = F + 3n;
   const moved = await (await loadEmergencyUpgrade(EMERGENCY_ID)).executed;
   expect(moved?.historical?.block).toBe((F + 2n).toString());
-  expect(state.checks.slice(3).map((c) => c.blockNumber)).toEqual([F + 2n, F + 2n, F + 2n]);
+  expect(state.checks.slice(2).map((c) => c.blockNumber)).toEqual([F + 2n, F + 2n]);
   // Above F nothing is kept: asked again. At F the kept answer still stands.
   await (await loadEmergencyUpgrade(EMERGENCY_ID)).executed;
-  expect(state.checks).toHaveLength(9);
+  expect(state.checks).toHaveLength(6);
   state.eventBlock = F + 1n;
   await (await loadEmergencyUpgrade(EMERGENCY_ID)).executed;
-  expect(state.checks).toHaveLength(9);
+  expect(state.checks).toHaveLength(6);
   release();
 });
 
@@ -408,7 +408,7 @@ it("shows a failed archive-state probe as checks not done, with the RPC error, a
   expect(failed?.historicalUnavailable).toBeNull();
   expect(failed?.historical?.block).toBe("25766163");
   expect(failed?.historical?.checks).toEqual(
-    ["Security Council", "Guardians", "ZKsync Foundation"].map((role) => ({
+    ["Security Council", "ZKsync Foundation"].map((role) => ({
       role,
       accepted: null,
       error: "RPC error: internal error (JSON-RPC error -32603)",
@@ -441,11 +441,7 @@ it("pages show the signatures' stale first answer at once and the strict roles a
   const first = await loading.first;
   expect(complete).toBe(false);
   expect(first.roles.map((r) => [r.key, r.set.stale, r.set.verifiedAtBlock])).toEqual(
-    ["securityCouncil", "guardians", "zkFoundation"].map((key) => [
-      key,
-      true,
-      (HEAD.number - 50n).toString(),
-    ])
+    ["securityCouncil", "zkFoundation"].map((key) => [key, true, (HEAD.number - 50n).toString()])
   );
   // Compared with the copies it came from, like the fresh roles.
   expect(first.roles.every((r) => r.used?.every((u) => u.matchesSafe === true))).toBe(true);

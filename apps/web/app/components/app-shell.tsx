@@ -60,7 +60,6 @@ const NAV: { to: string; label: string; name: string }[] = [
   { to: $path("/app/proposals"), label: "Upgrades", name: "Protocol upgrades" },
   { to: $path("/app/emergency"), label: "Emergency", name: "Emergency upgrades" },
   { to: $path("/app/freeze"), label: "Freeze", name: "Freeze requests" },
-  { to: $path("/app/l2-cancellations"), label: "Veto", name: "Guardian veto" },
 ];
 
 // A status in hand at once; a promise's once it settles, after hydration (so the server's and the
@@ -103,7 +102,7 @@ export default function AppShell({
   const landed = useLandedStatus(status);
   const ok = landed?.ok ? landed : null;
   // A handler this build cannot show: no page but Settings either, even one that reads no
-  // governance (a list would show the ZK Foundation's approvals as the Guardians').
+  // governance (a list would show the Guardians' approvals as the ZK Foundation's).
   const onSettings = useLocation().pathname === "/settings";
   const unsupported = landed && !landed.ok && landed.unsupported && !onSettings ? landed : null;
   // A new root status landed: it answers any request to read it again, and its age starts now.
@@ -728,14 +727,11 @@ function FooterRows({ status }: { status: OkStatus }) {
       <FooterRow label={`Security Council · ${g.securityCouncil.members.length} members`}>
         <AddressLink address={g.securityCouncil.address} />
       </FooterRow>
-      <FooterRow label={`Guardians · ${g.guardians.members.length} members`}>
-        <AddressLink address={g.guardians.address} />
+      <FooterRow label="ZKsync Foundation Safe">
+        <AddressLink address={g.zkFoundation} />
       </FooterRow>
       <FooterRow label="Emergency Upgrade Board">
         <AddressLink address={g.emergencyUpgradeBoard.address} />
-      </FooterRow>
-      <FooterRow label="ZKsync Foundation Safe">
-        <AddressLink address={g.emergencyUpgradeBoard.zkFoundation} />
       </FooterRow>
       <FooterRow label="Safe Transaction Service">
         <span className="mono break-all">{status.safeApi.url ?? "not configured"}</span>
@@ -747,7 +743,9 @@ function FooterRows({ status }: { status: OkStatus }) {
         )}
       </FooterRow>
       <FooterRow label="L2 (ZKsync Era) RPC">
-        {status.l2RpcConfigured ? "configured" : "not configured — L2 veto data unavailable"}
+        {status.l2RpcConfigured
+          ? "configured"
+          : "not configured — L2 proposal titles and upgrades to start unavailable"}
       </FooterRow>
     </>
   );

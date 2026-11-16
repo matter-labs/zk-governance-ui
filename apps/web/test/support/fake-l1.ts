@@ -5,7 +5,6 @@
 import {
   ERC1271_MAGIC_VALUE,
   emergencyUpgradeBoardAbi,
-  guardiansAbi,
   securityCouncilAbi,
   upgradeHandlerAbi,
 } from "@/common/abis";
@@ -33,8 +32,7 @@ export const L1 = {
   upgradeHandler: getAddress("0xE30Dca3047B37dc7d88849dE4A4Dc07937ad5Ab3"),
   deployBlock: 21_788_382n,
   securityCouncil: getAddress("0x59195219d1176E42f8e607e9AC114926D47f9035"),
-  guardians: getAddress("0x600dA620Ab29F41ABC6596a15981e14cE58c86b8"),
-  emergencyUpgradeBoard: getAddress("0xF73a7dCfa68E52030ec39E41a23DCA51F3aAa111"),
+  emergencyUpgradeBoard: getAddress("0x3DBD9c38cc4A0D380fE9E32ACE0D2b147aD29FF1"),
   zkFoundation: getAddress("0xbC1653bd3829dfEc575AfC3816D4899cd103B51c"),
   multicall3: getAddress("0xcA11bde05977b3631167028862bE2a173976CA11"),
 } as const;
@@ -42,7 +40,6 @@ export const L1 = {
 const member = (group: number, i: number) =>
   getAddress(`0x${group.toString(16)}${(i + 1).toString(16).padStart(39, "0")}`);
 export const SC_MEMBERS = [0, 1, 2].map((i) => member(0xa, i));
-export const G_MEMBERS = [0, 1, 2].map((i) => member(0xb, i));
 
 /** Every address's code on the fake node unless FakeL1Options.code says otherwise. */
 export const FAKE_CODE: Hex = "0x6080604052";
@@ -53,7 +50,6 @@ export const FAKE_SAFE_HANDLER = getAddress("0xf48f2B2d2a534e402487b3ee7C18c33Ae
 /** Code pins the fake contracts match, for chain/pins.ts overrideCodePinsForTests. */
 export const FAKE_PINS = {
   securityCouncil: keccak256(FAKE_CODE),
-  guardians: keccak256(FAKE_CODE),
   emergencyUpgradeBoard: keccak256(FAKE_CODE),
   safeProxy: keccak256(FAKE_CODE),
   safeSingleton: FAKE_SAFE_SINGLETON,
@@ -62,7 +58,7 @@ export const FAKE_PINS = {
 
 export type UpgradeOnChain = {
   state: number;
-  /** creationTimestamp, securityCouncilApprovalTimestamp, guardiansApproval, guardiansExtendedLegalVeto, executed */
+  /** creationTimestamp, securityCouncilApprovalTimestamp, zkFoundationApproval, zkFoundationExtendedLegalVeto, executed */
   status: readonly [number, number, boolean, boolean, boolean];
 };
 
@@ -155,6 +151,12 @@ const multicallViewAbi = parseAbi([
   "function getBlockNumber() view returns (uint256 blockNumber)",
   "function getLastBlockHash() view returns (bytes32 blockHash)",
 ]);
+// The handler's ABI, and the getter only the handler from before ZIP-19 has (the app asks it only to
+// tell that handler apart; this one reverts, unless a test's `answer` says otherwise).
+const fakeHandlerAbi = [
+  ...upgradeHandlerAbi,
+  ...parseAbi(["function guardians() view returns (address)"]),
+] as Abi;
 const outOfBounds = encodeErrorResult({ abi: errorAbi, errorName: "Panic", args: [0x32n] });
 const REVERT = Symbol("revert");
 /** FakeL1Options.answer's way to make a call revert (Panic 0x32, as members(i) past the end). */
@@ -164,11 +166,9 @@ function abiOf(to: Address, aliases?: Map<Address, Address>): Abi {
   const address = getAddress(to);
   switch (aliases?.get(address) ?? address) {
     case L1.upgradeHandler:
-      return upgradeHandlerAbi as Abi;
+      return fakeHandlerAbi;
     case L1.securityCouncil:
       return securityCouncilAbi as Abi;
-    case L1.guardians:
-      return guardiansAbi as Abi;
     case L1.emergencyUpgradeBoard:
       return emergencyUpgradeBoardAbi as Abi;
     case L1.multicall3:
@@ -232,10 +232,13 @@ export function fakeL1(options: FakeL1Options) {
     const tables: Record<string, Record<string, () => unknown>> = {
       [L1.upgradeHandler]: {
         securityCouncil: () => L1.securityCouncil,
-        guardians: () => L1.guardians,
+        zkFoundation: () => L1.zkFoundation,
         emergencyUpgradeBoard: () => L1.emergencyUpgradeBoard,
-        // Only the handler without Guardians has it (zk-governance #51); mainnet's reverts.
-        zkFoundation: () => REVERT,
+        // Only the handler from before ZIP-19 has it.
+        guardians: () => REVERT,
+        // The ZK Foundation's own calls (simulated from its Safe while a step is open): accepted.
+        approveUpgradeZkFoundation: () => new RawAnswer("0x"),
+        extendLegalVeto: () => new RawAnswer("0x"),
         protocolFrozenUntil: () => 0n,
         lastFreezeStatusInUpgradeCycle: () => 0,
         upgradeState: () => upgrades.get(id)?.state ?? 0,
@@ -258,22 +261,9 @@ export function fakeL1(options: FakeL1Options) {
         checkSignatures,
         isValidSignature: multisigIsValid,
       },
-      [L1.guardians]: {
-        EIP1271_THRESHOLD: () => 2n,
-        APPROVE_UPGRADE_GUARDIANS_THRESHOLD: () => 2n,
-        EXTEND_LEGAL_VETO_THRESHOLD: () => 1n,
-        CANCEL_L2_GOVERNOR_PROPOSAL_THRESHOLD: () => 2n,
-        nonce: () => 0n,
-        PROTOCOL_UPGRADE_HANDLER: () => L1.upgradeHandler,
-        eip712Domain: () => domain("Guardians"),
-        members: () => G_MEMBERS[Number(call.args[0])] ?? REVERT,
-        checkSignatures,
-        isValidSignature: multisigIsValid,
-      },
       [L1.emergencyUpgradeBoard]: {
         ZK_FOUNDATION_SAFE: () => L1.zkFoundation,
         SECURITY_COUNCIL: () => L1.securityCouncil,
-        GUARDIANS: () => L1.guardians,
         PROTOCOL_UPGRADE_HANDLER: () => L1.upgradeHandler,
         eip712Domain: () => domain("EmergencyUpgradeBoard"),
       },

@@ -78,12 +78,7 @@ const GOVERNANCE = {
     thresholds: { approveUpgrade: 6 },
     domain: { name: "SecurityCouncil", version: "1", chainId: 1, verifyingContract: PUH },
   },
-  guardians: {
-    address: PUH,
-    members: [],
-    thresholds: { approveUpgrade: 5, extendLegalVeto: 2 },
-    domain: { name: "Guardians", version: "1", chainId: 1, verifyingContract: PUH },
-  },
+  zkFoundation: "0x0000000000000000000000000000000000000f00",
   emergencyUpgradeBoard: {
     address: PUH,
     zkFoundation: "0x0000000000000000000000000000000000000f00",

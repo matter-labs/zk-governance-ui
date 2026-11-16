@@ -1,7 +1,6 @@
 import type { EmergencySummary, PendingEmergencies } from "../flows/emergency";
 import type { FreezeList } from "../flows/freeze";
-import type { L2ProposalView, NotStartedUpgrade } from "../flows/l2";
-import type { SignedVetoes, VetoableProposals } from "../flows/l2-veto";
+import type { NotStartedUpgrade } from "../flows/l2";
 import type { UpgradeList } from "../flows/standard";
 import type { AppStatus } from "../status";
 import type { UpgradeStatusRead } from "../upgrade-status";
@@ -39,7 +38,7 @@ export const upgradeListContent = (list: Pick<UpgradeList, "upgrades" | "allHist
     state: u.state,
     createdAt: u.createdAt,
     approvedBySecurityCouncil: u.approvedBySecurityCouncil,
-    approvedByGuardians: u.approvedByGuardians,
+    approvedByZkFoundation: u.approvedByZkFoundation,
     legalVetoExtended: u.legalVetoExtended,
   })),
 });
@@ -60,37 +59,6 @@ export const freezeListContent = (list: Pick<FreezeList, "requests" | "errors" |
   requests: list.requests,
   errors: list.errors,
   anomalies: list.anomalies,
-});
-
-/** An L2 proposal as pages show it (its state changes; its content does not). */
-export const l2ProposalContent = (p: L2ProposalView | null) =>
-  p && {
-    governor: p.governor,
-    proposalId: p.proposalId,
-    state: p.state,
-    voteStart: p.voteStart,
-    voteEnd: p.voteEnd,
-    idMatchesLocal: p.idMatchesLocal,
-    idMatchesContract: p.idMatchesContract,
-  };
-
-/** The veto list (`list:vetoes`): vetoes signed in Safe with their state, vetoable proposals. */
-export const vetoListContent = (
-  signed: Pick<SignedVetoes, "vetoes" | "errors" | "anomalies">,
-  vetoable: Pick<VetoableProposals, "vetoable" | "l2Error" | "historyMissing">
-) => ({
-  vetoes: signed.vetoes,
-  errors: signed.errors,
-  anomalies: signed.anomalies,
-  vetoable: vetoable.vetoable.map(l2ProposalContent),
-  l2Error: vetoable.l2Error !== null,
-  l2HistoryMissing: vetoable.historyMissing !== null,
-});
-
-/** A veto page's L2 proposal (`l2:<governor>:<id>`). */
-export const l2Content = (proposal: L2ProposalView | null, l2Error: string | null) => ({
-  proposal: l2ProposalContent(proposal),
-  l2Error: l2Error !== null,
 });
 
 /** The upgrades that can start (`list:startable`). */

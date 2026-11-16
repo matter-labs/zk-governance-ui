@@ -3,7 +3,6 @@ import { puhIndex } from "@/.server/chain/puh-index";
 import { readBodyAtMost } from "@/.server/request";
 import { type SafeCheck, burstsRunning } from "@/.server/safe/store";
 import { onScreenSafeChecks } from "@/.server/signatures";
-import { eraHeadsFor } from "@/.server/sync/content-engine";
 import { listSafeChecks, noteSigned, syncView, wakeSync } from "@/.server/sync/engine";
 import {
   BEAT_EVERY_MS,
@@ -33,9 +32,12 @@ export type BeatAnswer = {
   verifiedAt: Record<string, { rev: string; block: string }>;
   /** A non-Era item named at a block before `head` is shown as of that block, never as current. */
   notedAt: Record<string, { rev: string; block: string }>;
-  /** A head whose reads failed is never named. */
+  /**
+   * The ZKsync Era head each Era item was read at. No page names one any more (the Guardians'
+   * veto pages did): always empty, kept for pages still open.
+   */
   eraAt: Record<string, { number: string; readAt: string }>;
-  /** The oldest of `eraAt`, or null (kept for older pages). */
+  /** The oldest of `eraAt`: always null (kept for older pages). */
   era: { number: string; readAt: string } | null;
   /** A page shows a simulation as current only at the head served (`head`). */
   simulatedAt: Record<string, string>;
@@ -74,11 +76,7 @@ export async function action({ request }: ActionFunctionArgs) {
 function answer(items: Parameters<typeof compareRevs>[0]): BeatAnswer {
   const { head, catchingUp } = syncView();
   const { changed, unknown } = compareRevs(items);
-  const eraAt = eraHeadsFor(items);
   const index = puhIndex().status();
-  let era: BeatAnswer["era"] = null;
-  for (const read of Object.values(eraAt))
-    if (era === null || BigInt(read.number) < BigInt(era.number)) era = read;
   return {
     changed,
     unknown,
@@ -96,8 +94,8 @@ function answer(items: Parameters<typeof compareRevs>[0]): BeatAnswer {
     },
     verifiedAt: verifiedAt(items),
     notedAt: notedAt(items),
-    eraAt,
-    era,
+    eraAt: {},
+    era: null,
     simulatedAt: simulatedAt(items),
     index,
     nextMs:

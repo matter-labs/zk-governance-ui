@@ -13,12 +13,12 @@ import {
 import { latestBlock, resetRpcClients } from "@/.server/rpc";
 import { asEngineWork, pacer, readRateFrom, resetPacer } from "@/.server/sync/pacer";
 import { presence, resetPresence } from "@/.server/sync/presence";
-import { guardiansAbi, upgradeHandlerAbi } from "@/common/abis";
+import { securityCouncilAbi, upgradeHandlerAbi } from "@/common/abis";
 import { encodeFunctionData, numberToHex, zeroHash } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blockHash } from "../support/fake-chain";
 import { FakeRpcError } from "../support/fake-jsonrpc";
-import { type FakeL1Options, G_MEMBERS, L1, fakeL1 } from "../support/fake-l1";
+import { type FakeL1Options, L1, SC_MEMBERS, fakeL1 } from "../support/fake-l1";
 import { HEAD, HEAD_TIME, NOW, settle } from "../support/live-world";
 
 // chain/aggregate.ts: reads at one head gathered into Multicall3 aggregate3 calls, pinned to the
@@ -48,16 +48,16 @@ function node(options: Omit<FakeL1Options, "head"> = {}) {
 }
 
 const nonce = {
-  target: L1.guardians,
-  callData: encodeFunctionData({ abi: guardiansAbi, functionName: "nonce" }),
+  target: L1.securityCouncil,
+  callData: encodeFunctionData({ abi: securityCouncilAbi, functionName: "softFreezeNonce" }),
 };
 const check = (i: number) => ({
-  target: L1.guardians,
+  target: L1.securityCouncil,
   kind: "verdict" as const,
   callData: encodeFunctionData({
-    abi: guardiansAbi,
+    abi: securityCouncilAbi,
     functionName: "checkSignatures",
-    args: [zeroHash, [G_MEMBERS[0] as `0x${string}`], [numberToHex(i, { size: 65 })], 1n],
+    args: [zeroHash, [SC_MEMBERS[0] as `0x${string}`], [numberToHex(i, { size: 65 })], 1n],
   }),
 });
 const state = (id: number) => ({
@@ -84,7 +84,7 @@ describe("aggregates at a head", () => {
       functions: [
         "getBlockNumber",
         "getLastBlockHash",
-        "nonce",
+        "softFreezeNonce",
         "upgradeState",
         "upgradeState",
         "checkSignatures",
@@ -179,7 +179,7 @@ describe("aggregates at a head", () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    node({ gate: (call) => (call.functionName === "nonce" ? held : undefined) });
+    node({ gate: (call) => (call.functionName === "softFreezeNonce" ? held : undefined) });
     const head = await settle(latestBlock());
     const out = aggregateAt(head, nonce);
     void out.catch(() => {});

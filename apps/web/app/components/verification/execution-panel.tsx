@@ -137,6 +137,7 @@ export function ExecutionPanel({
   extra,
   blockedReason = null,
   onSent,
+  onSafeTransaction,
 }: {
   execution: ExecutionLike;
   toLabel?: string;
@@ -147,6 +148,11 @@ export function ExecutionPanel({
   blockedReason?: string | null;
   /** Sent: the hash goes here (the caller shows it); without it, the panel shows it itself. */
   onSent?: (hash: Hex) => void;
+  /**
+   * Created in the connected Safe: its safeTxHash goes here (the caller shows it, and the page keeps
+   * updating meanwhile); without it, the panel shows it and holds the page's data until dismissed.
+   */
+  onSafeTransaction?: (safeTxHash: Hex) => void;
 }) {
   const { isConnected } = useAccount();
   const { sendTransaction, isPending } = useSendTransaction();
@@ -199,7 +205,8 @@ export function ExecutionPanel({
         onSuccess: (hash) => {
           if (viaSafe) {
             toast.success("Your Safe has the transaction", { id: "send-tx" });
-            setSafeTxHash(hash);
+            if (onSafeTransaction) onSafeTransaction(hash);
+            else setSafeTxHash(hash);
             return;
           }
           toast.success("Transaction sent", { id: "send-tx" });

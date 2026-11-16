@@ -150,7 +150,10 @@ function UpgradeTable({
   range: UpgradeWindow;
   refresh?: Refresh;
 }) {
-  const active = result.upgrades.filter((u) => isUpgradeActive(u.state));
+  // The list comes newest first. In progress: in the order they started (oldest first), the order
+  // they are approved and executed in, so one L2 proposal's L1 proposals read #1, #2, … as on Tally.
+  // Completed: newest first.
+  const active = result.upgrades.filter((u) => isUpgradeActive(u.state)).reverse();
   const past = result.upgrades.filter((u) => !isUpgradeActive(u.state));
   const switching = useSwitchingWindow();
   // The list as the beats name it: one not read again at the head served now is shown as of its
@@ -299,7 +302,7 @@ function UpgradeRows({
             </span>
             <span className="flex flex-wrap items-center gap-1.5">
               {u.approvedBySecurityCouncil && <Flag label="Security Council" />}
-              {u.approvedByGuardians && <Flag label="Guardians" />}
+              {u.approvedByZkFoundation && <Flag label="ZK Foundation" />}
               {u.legalVetoExtended && <Badge variant="navy">Veto extended</Badge>}
             </span>
             <UpgradeStateBadge state={u.state} />

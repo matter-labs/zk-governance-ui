@@ -52,13 +52,14 @@ const execution = (label: Record<string, true>) => ({
   proposal: { calls: [], executor: ADDRESS, salt: `0x${"00".repeat(32)}` },
   calls: [],
   idMatches: true,
+  beforeZip19: false,
   ...label,
 });
 
 const accepted = {
   historical: {
     block: "20999999",
-    checks: ["Security Council", "Guardians", "ZKsync Foundation"].map((role) => ({
+    checks: ["Security Council", "ZKsync Foundation"].map((role) => ({
       role,
       accepted: true,
       error: null,
@@ -153,5 +154,14 @@ describe("an executed emergency upgrade's execution, before the index confirms i
     await act(async () => historical.resolve(accepted));
     expect(screen.getByTestId("board-checks")).toHaveTextContent("ZKsync Foundation accepted");
     expect(screen.queryByTestId("board-checks-unconfirmed")).toBeNull();
+    expect(screen.queryByTestId("board-before-zip19")).toBeNull();
+  });
+
+  it("says an execution through a board from before ZIP-19 also had the Guardians' signatures checked", async () => {
+    const { historical } = show({ beforeZip19: true });
+    await act(async () => historical.resolve(accepted));
+    expect(screen.getByTestId("board-before-zip19")).toHaveTextContent(
+      "only the Security Council's and the ZKsync Foundation's are shown"
+    );
   });
 });

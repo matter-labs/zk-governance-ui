@@ -18,10 +18,6 @@ export const Meta = {
   "/app/emergency/new": (() => title("Prepare an emergency upgrade")) satisfies MetaFunction,
   "/app/freeze": (() => title("Freeze requests")) satisfies MetaFunction,
   "/app/freeze/:action": (() => title("Freeze request")) satisfies MetaFunction,
-  "/app/l2-cancellations": (() => title("Guardian veto")) satisfies MetaFunction,
-  "/app/l2-cancellations/:id": (({ params }) =>
-    title(`Veto of L2 proposal ${short(params.id)}`)) satisfies MetaFunction,
-  "/app/l2-cancellations/new": (() => title("Prepare a veto")) satisfies MetaFunction,
   "/app/transactions/:hash": (({ params }) =>
     title(`Transaction ${short(params.hash)}`)) satisfies MetaFunction,
 };

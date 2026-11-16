@@ -4,18 +4,17 @@
   "owner": "0xF378708B88841Abb63e2316E4Fc8f29469beE885",
   "zkGovernance": {
     "repo": "https://github.com/zksync-association/zk-governance.git",
-    "commit": "58df93fc38a0d439c9d2dff4563779251f1c0b64"
+    "commit": "d9bd203943434a6a78c382f844b05cd6745066ac"
   },
   "l2ProtocolGovernor": "0xa0eD7885B408961430F89d797cD1cc87530D8fBe",
-  "handlerDeployBlock": 11949797,
+  "handlerDeployBlock": 12148215,
   "contracts": {
-    "protocolUpgradeHandler": "0xd5e02dF8496160A9055adb4cEDf5fA7d826C526E",
-    "protocolUpgradeHandlerImplementation": "0x056761c154DE6634BA27226a0c32Dfb32e59a753",
-    "proxyAdmin": "0xd0dcbaa462cd8e53c2928d0a7e575264da5abab7",
-    "securityCouncil": "0x3911412575371B726A57117a184aC4963C402C0e",
-    "guardians": "0x3B3686bAAcef52b4C340C64adA94294eEA54F130",
-    "emergencyUpgradeBoard": "0x97e0fBC1195D24d7186555222BF0d4507bd62F18",
-    "zksyncStub": "0xC1A682852EdcEF58cE8B85861DaB092FC052996D"
+    "protocolUpgradeHandler": "0xf6DAF2669389F2A478aa095b064d4C3116B778Ae",
+    "protocolUpgradeHandlerImplementation": "0xa6762Ce837a56C81855f9A633c44Bd4E7d977cc8",
+    "proxyAdmin": "0xd04e6ef4d236ed49bd3053d36001918b26235ed4",
+    "securityCouncil": "0xB0BdAa5A45de1a0119b52e123E65c24d80977431",
+    "emergencyUpgradeBoard": "0x58e11094e8523E8E8baB17FB90CB28a38F328B04",
+    "zksyncStub": "0x43c2fBbb2a680e2d3B26A265D924D6c1c0DC951D"
   },
   "safes": {
     "securityCouncil": [
@@ -52,49 +51,14 @@
         "address": "0x605b7bfFc1387f7B4a28030b3C5a14Cfc42604c1"
       }
     ],
-    "guardians": [
-      {
-        "label": "Guardian 1",
-        "address": "0xF74D507fb565db46ea6097f8559e4FA0209FF281"
-      },
-      {
-        "label": "Guardian 2",
-        "address": "0x679E742D8EB21C9df5Cf6833cCD11db65340B830"
-      },
-      {
-        "label": "Guardian 3",
-        "address": "0xA15F1e684AaA1eeFDb7334382EEC99e92B0B0698"
-      },
-      {
-        "label": "Guardian 4",
-        "address": "0x0BE034e513828319328995323c82bDD6eEbC4006"
-      },
-      {
-        "label": "Guardian 5",
-        "address": "0x8313dC42Ca4fd548165C82e3B990c48D4c2ADe35"
-      },
-      {
-        "label": "Guardian 6",
-        "address": "0x3cc6A188764633fbd9C100561C2AC5eCe9d6A2F8"
-      },
-      {
-        "label": "Guardian 7",
-        "address": "0x43cc5CFcce263E4EDf2ec7Ca2c389E2821BCC7ed"
-      },
-      {
-        "label": "Guardian 8",
-        "address": "0x429A4C757980b1Ac9c404Ec656BF0870094D6Bcd"
-      }
-    ],
     "zkFoundation": {
       "label": "ZK Foundation",
       "address": "0xb31c0e6BE8eF10d194c9584E74317bDb9155d902"
     }
   },
   "codeHashes": {
-    "securityCouncil": "0x7e6f0fed4c704c992f1f56bd4ae78b47c8feccdd3e463a6e7a126596fe7efc2c",
-    "guardians": "0xddd6a317a884992d5f8bc50a1d911354c8856273c76cff4dff21e755354ecf12",
-    "emergencyUpgradeBoard": "0x6d26602913a2e5d4471be29afc8f6a5730d9e57a106abc0654e12368e046c573",
+    "securityCouncil": "0x6a959076196eccab8614784f209db43cd812b889e9a9e5ec095ee40736b0c53d",
+    "emergencyUpgradeBoard": "0x708930bccb329615625db4c7cedf0cbe501ec2fecf610ff35467505c1af41d27",
     "safeProxy": "0xb89c1b3bdf2cf8827818646bce9a8f6e372885f8c55e5c07acbd307cb133b000"
   },
   "upgrades": [
@@ -104,11 +68,11 @@
     },
     {
       "title": "Mainnet upgrade 0x77d5461c…'s call, sent to the stub (executes)",
-      "id": "0x7966801a356e3e16ba458183aa71cea62c008b25e657378fa3413070d7a5d3dd"
+      "id": "0x67c303566796a02e6e3bca12c9f4371e59fc8c6e63ce7871bd2e1fc106465416"
     },
     {
       "title": "Mainnet upgrade 0x2d891fb5…'s call, sent to the stub (executes)",
-      "id": "0xe9dc0728967e596ffb76855bd3f162169215144583168a0b5208480de4132b17"
+      "id": "0x21065a905e17334eab7a3030fa0875f1c078cc30e08c963904facd986d6b5021"
     }
   ]
 }

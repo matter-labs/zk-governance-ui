@@ -92,7 +92,7 @@ vi.mock("@/.server/governance", () => ({
     network: { isDevNode: false },
     upgradeHandler: PUH,
     securityCouncil: { address: PUH, members: [] },
-    guardians: { address: PUH, members: [] },
+    zkFoundation: PUH,
     emergencyUpgradeBoard: { address: PUH, zkFoundation: PUH, domain: {} },
   }),
 }));

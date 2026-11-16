@@ -94,11 +94,7 @@ vi.mock("@/.server/governance", () => ({
       network: { isDevNode: false, standardLegalVetoDays: 3 },
       upgradeHandler: PUH,
       securityCouncil: { address: PUH, members: [], thresholds: { approveUpgrade: 6 } },
-      guardians: {
-        address: PUH,
-        members: [],
-        thresholds: { approveUpgrade: 5, extendLegalVeto: 2 },
-      },
+      zkFoundation: PUH,
     };
   },
 }));
@@ -249,7 +245,7 @@ describe("listStandardUpgrades", () => {
       stateLabel: expect.any(String),
       createdAt: Number(time(RECENT_BLOCK)),
       approvedBySecurityCouncil: false,
-      approvedByGuardians: false,
+      approvedByZkFoundation: false,
       legalVetoExtended: false,
     });
   });
