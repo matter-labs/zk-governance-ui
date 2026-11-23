@@ -73,7 +73,7 @@ const transaction = (hash: Hex) => ({
   hash,
   from: zeroAddress,
   to: L1.emergencyUpgradeBoard,
-  input: emergencyExecution(L1.emergencyUpgradeBoard, PROPOSAL, [], [], "0x01").data,
+  input: emergencyExecution(L1.emergencyUpgradeBoard, PROPOSAL, [], "0x01").data,
   value: "0x0",
   nonce: "0x0",
   gas: "0x0",
@@ -121,7 +121,7 @@ describe("the upgrade page after a pause", () => {
     const firstSets = (await settle(before.sets as Promise<unknown>)) as HeldSet[];
     const current = shownSets ?? firstSets;
     await load(before);
-    expect(current.map((s) => s.set.stale)).toEqual([false, false, false]);
+    expect(current.map((s) => s.set.stale)).toEqual([false]);
 
     // Longer than the page rule: the copies are older than 60 s.
     await pause(w, 6);
@@ -160,7 +160,7 @@ describe("the upgrade page after a pause", () => {
     for (const s of fresh ?? first) expect(s.set.verifiedAtBlock).toBe((HEAD + 6n).toString());
     // A stale first answer of an executed upgrade's sets: its copies are kept, not refreshed (and
     // indeed Safe is not asked).
-    expect(first.filter((s) => s.set.stale)).toHaveLength(3);
+    expect(first.filter((s) => s.set.stale)).toHaveLength(1);
     for (const s of first) expect(s.set.rereadsSafe).toBe(false);
     expect(w.safeRequests.length).toBe(safeBefore);
     await load(after);

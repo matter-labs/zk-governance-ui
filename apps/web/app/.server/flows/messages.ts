@@ -17,8 +17,7 @@ import {
   pageSafeListing,
 } from "../safe/store";
 
-// Freeze requests, L2 vetoes and emergency upgrades exist only as messages members signed in their
-// Safes. This turns those listings into proposals, keeping a message only when its typed data is
+// Freeze requests and emergency upgrades exist only as messages members signed in their Safes. This turns those listings into proposals, keeping a message only when its typed data is
 // one of ours, its domain is the live contract's, and the hash Safe filed it under is the one this
 // app computes for that Safe. Signature validity is checked later, per proposal, on-chain.
 

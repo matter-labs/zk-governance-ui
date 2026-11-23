@@ -11,7 +11,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clearCache } from "@/.server/cache";
 import { l2GovernorIndex } from "@/.server/chain/l2-index";
-import { activeL2ProposalsAnswer } from "@/.server/flows/l2";
 import { IndexIncomplete } from "@/.server/chain/log-index";
 import { puhIndex } from "@/.server/chain/puh-index";
 import {
@@ -89,7 +88,7 @@ const mainnet = (overrides: Record<string, unknown> = {}) => ({
   forkBlock: null,
   safeTxServiceUrl: SAFE_URL,
   l2RpcUrl: null,
-  l2Governors: { protocol: null, token: null, govOps: null },
+  l2Governors: { protocol: null },
   blockTimeSeconds: 12,
   overrides: [],
   clientVersion: "Geth/v1.15",
@@ -779,17 +778,17 @@ describe("the L2 governors' history", () => {
   const ERA_MAINNET = () =>
     mainnet({
       l2RpcUrl: ERA_URL,
-      l2Governors: { ...GOVERNORS },
+      l2Governors: { protocol: GOVERNORS.protocol },
     });
   const proposals = () => [
     {
-      governor: GOVERNORS.token,
+      governor: GOVERNORS.protocol,
       description: "first",
       created: 49_077_771n,
       executed: 49_477_771n,
       state: 7,
     },
-    { governor: GOVERNORS.govOps, description: "second", created: ERA_FINAL - 9_000n, state: 1 },
+    { governor: GOVERNORS.protocol, description: "second", created: ERA_FINAL - 9_000n, state: 1 },
   ];
   /** Era whose backfill waits for `release()`; its tail is answered. */
   const heldEra = (list: Parameters<typeof fakeEra>[0]) => {
@@ -819,7 +818,7 @@ describe("the L2 governors' history", () => {
     expect(await saveChainCache()).toBe(true);
     const saved = readFile();
     expect(saved.l2).toMatchObject({ l2ChainId: 0x144, addresses: expect.any(Array) });
-    expect(saved.l2.addresses).toHaveLength(3);
+    expect(saved.l2.addresses).toEqual([GOVERNORS.protocol.toLowerCase()]);
     expect(saved.l2.topic0).toHaveLength(3);
     expect(saved.l2.logs).toHaveLength(3);
 
@@ -860,49 +859,6 @@ describe("the L2 governors' history", () => {
     await vi.waitFor(() => expect(chainCacheStatus().state).toBe("mismatch"));
     const strict = await l2GovernorIndex().read();
     expect(strict.events[0]?.proposalId).toBe(proposalIdOf("first"));
-  });
-
-  it("answers a page's vetoable list, labelled, and never keeps what a seeded log says", async () => {
-    const vetoable = () => [
-      ...proposals(),
-      { governor: GOVERNORS.govOps, description: "third", created: ERA_FINAL - 8_000n, state: 1 },
-    ];
-    restart(ERA_MAINNET());
-    upstream({ era: fakeEra(vetoable()) });
-    await loadChainCache({ dir: cacheDir() });
-    await Promise.all([puhIndex().startBackfill(), l2GovernorIndex().startBackfill()]);
-    expect((await activeL2ProposalsAnswer()).proposals.map((p) => p.description)).toEqual([
-      "second",
-      "third",
-    ]);
-    expect(await saveChainCache()).toBe(true);
-    const saved = readFile();
-    // "second"'s creation, at its place in the chain, says what "third"'s does.
-    const logs = saved.l2.logs as { data: Hex }[];
-    const [second, third] = logs.slice(-2) as [{ data: Hex }, { data: Hex }];
-    writeFile({
-      ...saved,
-      l2: { ...saved.l2, logs: [...logs.slice(0, -2), { ...second, data: third.data }, third] },
-    });
-
-    restart(ERA_MAINNET());
-    const { era, release } = heldEra(vetoable());
-    upstream({ era });
-    await loadChainCache({ dir: cacheDir() });
-    const backfill = l2GovernorIndex().startBackfill();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    // A page: what the saved history says, labelled as such; states are read now.
-    const page = await activeL2ProposalsAnswer({ provisional: true });
-    expect(page.provisional).toBe(true);
-    expect(page.proposals.map((p) => p.description)).toEqual(["third", "third"]);
-    expect(page.proposals.every((p) => p.state === "Active")).toBe(true);
-    release();
-    await backfill;
-    // This run's list: the chain's history, with nothing kept from what the saved log said.
-    const strict = await activeL2ProposalsAnswer();
-    expect(strict.provisional).toBe(false);
-    expect(strict.proposals.map((p) => p.description)).toEqual(["second", "third"]);
-    expect(strict.proposals[0]?.proposalId).toBe(proposalIdOf("second").toString());
   });
 
   it.each([

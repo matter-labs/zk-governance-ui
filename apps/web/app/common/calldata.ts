@@ -34,7 +34,7 @@ const BUILT_IN = parseAbi([
   "function acceptAdmin()",
   "function setPendingAdmin(address newPendingAdmin)",
   "function updateSecurityCouncil(address _newSecurityCouncil)",
-  "function updateGuardians(address _newGuardians)",
+  "function updateZkFoundation(address _newZkFoundation)",
   "function updateEmergencyUpgradeBoard(address _newEmergencyUpgradeBoard)",
   "function freezeChain(uint256 _chainId)",
   "function unfreezeChain(uint256 _chainId)",

@@ -1,6 +1,6 @@
 import { clearCache } from "@/.server/cache";
 import type { Lane } from "@/.server/chain/jsonrpc";
-import { guardiansAbi, safeAbi, securityCouncilAbi } from "@/common/abis";
+import { safeAbi, securityCouncilAbi } from "@/common/abis";
 import {
   type Address,
   CallExecutionError,
@@ -85,7 +85,7 @@ function answering(reply: (call: FakeCall) => unknown, options: Omit<FakeOptions
 const checkSignatures = (blockNumber?: bigint, address: Address = COUNCIL) =>
   callFn({
     address,
-    abi: guardiansAbi,
+    abi: securityCouncilAbi,
     functionName: "checkSignatures",
     args: [zeroHash, [SIGNER], ["0xaa"], 1n],
     blockNumber,
@@ -287,7 +287,7 @@ describe("ethCall over the call lane", () => {
   });
 
   it("never sends a call through Multicall3", async () => {
-    const fake = answering(contracts({ abis: [guardiansAbi], call: () => undefined }));
+    const fake = answering(contracts({ abis: [securityCouncilAbi], call: () => undefined }));
     await checkSignatures();
     expect(fake.calls().every((c) => (c.params[0] as { to: string }).to !== MULTICALL3)).toBe(true);
   });
@@ -298,7 +298,7 @@ describe("callFn", () => {
     const codeAt: [Address, string][] = [];
     answering(
       contracts({
-        abis: [guardiansAbi],
+        abis: [securityCouncilAbi],
         call: () => undefined,
         code: (address, block) => {
           codeAt.push([address, block]);
@@ -316,7 +316,10 @@ describe("callFn", () => {
 
   it("reports a definite revert of a void function", async () => {
     answering(
-      contracts({ abis: [guardiansAbi], call: () => revertWith("Signature verification failed") })
+      contracts({
+        abis: [securityCouncilAbi],
+        call: () => revertWith("Signature verification failed"),
+      })
     );
     expect(await failure(checkSignatures())).toMatchObject({
       name: "CallReverted",
@@ -341,16 +344,16 @@ describe("callFn", () => {
   it("decodes several outputs", async () => {
     answering(
       contracts({
-        abis: [guardiansAbi],
-        call: () => ["0x0f", "Guardians", "1", 1n, COUNCIL, zeroHash, []],
+        abis: [securityCouncilAbi],
+        call: () => ["0x0f", "SecurityCouncil", "1", 1n, COUNCIL, zeroHash, []],
       })
     );
     const domain = await callFn<readonly unknown[]>({
       address: COUNCIL,
-      abi: guardiansAbi,
+      abi: securityCouncilAbi,
       functionName: "eip712Domain",
     });
-    expect(domain.slice(1, 5)).toEqual(["Guardians", "1", 1n, COUNCIL]);
+    expect(domain.slice(1, 5)).toEqual(["SecurityCouncil", "1", 1n, COUNCIL]);
   });
 });
 

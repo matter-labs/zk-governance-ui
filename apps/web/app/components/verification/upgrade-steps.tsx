@@ -26,15 +26,15 @@ function afterApproval(delaySeconds: number) {
 
 /**
  * A standard upgrade's steps, on the path it normally takes: the Security Council approves it after
- * the legal veto, and it is ready a day later. The Guardians' path (their approval takes effect 30
- * days after the legal veto) is shown only once they took it; an upgrade nobody approved in time
+ * the legal veto, and it is ready a day later. The ZK Foundation's path (its approval takes effect
+ * 30 days after the legal veto) is shown only once it took it; an upgrade nobody approved in time
  * shows as expired.
  */
 export function upgradeSteps({
   state,
   timeline: t,
   legalVetoExtended,
-  guardiansApproved,
+  zkFoundationApproved,
   now,
   executed,
 }: {
@@ -44,7 +44,7 @@ export function upgradeSteps({
     "createdAt" | "legalVetoEndsAt" | "waitingEndsAt" | "approvedAt" | "readyAt" | "delaySeconds"
   >;
   legalVetoExtended: boolean;
-  guardiansApproved: boolean;
+  zkFoundationApproved: boolean;
   now: number;
   /** The Executed step's time, once its transaction is found. */
   executed?: ReactNode;
@@ -53,9 +53,9 @@ export function upgradeSteps({
   const approval: TimelineStep =
     t.approvedAt !== null
       ? { label: "Approved by the Security Council", at: t.approvedAt, done: true }
-      : guardiansApproved
+      : zkFoundationApproved
         ? {
-            label: "Approved by the Guardians",
+            label: "Approved by the ZK Foundation",
             at: null,
             done: true,
             time: (

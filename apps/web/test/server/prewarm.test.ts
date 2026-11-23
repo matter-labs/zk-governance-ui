@@ -89,12 +89,10 @@ const { warmMessageReadings } = await import("@/.server/flows/messages");
 
 const address = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as Address;
 const SC = [address(1), address(2), address(3)];
-// One Guardian is also a Security Council member (lower case): listed once.
-const G = [address(4), address(2).toLowerCase() as Address, address(5)];
 const ZKF = address(6);
 const GOV = {
   securityCouncil: { members: SC },
-  guardians: { members: G },
+  zkFoundation: ZKF,
   emergencyUpgradeBoard: { zkFoundation: ZKF },
 } as unknown as Governance;
 const NET = { chainId: 1, safeTxServiceUrl: "https://api.safe.global/tx-service/eth" };
@@ -197,15 +195,15 @@ describe("prewarm", () => {
     l2.resolve();
     await run;
     const safeEvents = state.events.filter((e) => e.startsWith("safe:"));
-    const order = [...SC, address(4), address(5), ZKF];
-    // One at a time: each listing ends before the next starts; SC, then Guardians, then ZKF.
+    const order = [...SC, ZKF];
+    // One at a time: each listing ends before the next starts; SC, then ZKF.
     expect(safeEvents).toEqual(order.flatMap((safe) => [`safe:start:${safe}`, `safe:end:${safe}`]));
     expect(listSafeMessages).toHaveBeenCalledTimes(order.length);
     expect(checkLogHistory).toHaveBeenCalledWith({ client: "l1" });
     // Then the messages of the listings held are read (parsed and hashed), once all are in.
     expect(warmMessageReadings).toHaveBeenCalledTimes(1);
     expect(warmMessageReadings).toHaveBeenCalledWith(order);
-    expect(state.events.indexOf("messages:6")).toBeGreaterThan(
+    expect(state.events.indexOf("messages:4")).toBeGreaterThan(
       state.events.indexOf(`safe:end:${ZKF}`)
     );
 
@@ -229,14 +227,21 @@ describe("prewarm", () => {
       logs: 81,
     });
     const listings = state.records.find((r) => r.fields.step === "safe-listings");
-    expect(listings?.fields).toMatchObject({ listed: 6, of: 6 });
+    expect(listings?.fields).toMatchObject({ listed: 4, of: 4 });
     const messages = state.records.find((r) => r.fields.step === "safe-messages");
     expect(messages?.fields).toMatchObject({ reason: "boot", read: 42 });
     for (const record of state.records) expect(typeof record.fields.ms).toBe("number");
   });
 
-  it("lists SC members, then Guardians, then the ZK Foundation, each Safe once", () => {
-    expect(governanceSafes(GOV)).toEqual([...SC, address(4), address(5), ZKF]);
+  it("lists SC members, then the ZK Foundation, each Safe once", () => {
+    expect(governanceSafes(GOV)).toEqual([...SC, ZKF]);
+    // The ZK Foundation's Safe also a Security Council member (lower case): listed once.
+    const shared = address(2).toLowerCase() as Address;
+    const overlapping = {
+      ...GOV,
+      emergencyUpgradeBoard: { zkFoundation: shared },
+    } as unknown as Governance;
+    expect(governanceSafes(overlapping)).toEqual(SC);
   });
 
   it("resolves when the network read rejects, and skips everything that depends on it", async () => {
@@ -291,7 +296,7 @@ describe("prewarm", () => {
     const listings = state.records.find((r) => r.fields.step === "safe-listings");
     expect(listings).toMatchObject({
       level: "warn",
-      fields: { error: "SafeApiError", listed: 0, of: 6 },
+      fields: { error: "SafeApiError", listed: 0, of: 4 },
     });
   });
 
@@ -407,11 +412,11 @@ describe("prewarm", () => {
     const second = prewarm("settings");
     expect(second).not.toBe(first);
     await second;
-    expect(listSafeMessages).toHaveBeenCalledTimes(6);
+    expect(listSafeMessages).toHaveBeenCalledTimes(4);
 
     gov.resolve();
     await first;
-    expect(listSafeMessages).toHaveBeenCalledTimes(6);
+    expect(listSafeMessages).toHaveBeenCalledTimes(4);
     const boot = state.records.filter((r) => r.fields.reason === "boot").map((r) => r.fields.step);
     // Steps log as they finish: governance, held back above, comes last of the three.
     expect(boot.filter((step) => step !== "l2-index")).toEqual([
@@ -442,7 +447,7 @@ describe("prewarm", () => {
     expect(warmMessageReadings).not.toHaveBeenCalled();
     expect(state.records.find((r) => r.fields.step === "safe-listings")?.fields).toMatchObject({
       listed: 2,
-      of: 6,
+      of: 4,
     });
   });
 });

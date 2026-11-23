@@ -1,8 +1,7 @@
 import { freezeActionFromSlug } from "@/common/freeze";
 import { badRequest, notFound } from "@/utils/http";
-import { type Hex, getAddress, isAddress } from "viem";
+import type { Hex } from "viem";
 import type { FreezeParams } from "./flows/freeze";
-import type { VetoParams } from "./flows/l2-veto";
 import { bytes32Pattern } from "./request";
 
 // URL → flow parameters, shared by the pages and the JSON API so both run the same checks.
@@ -40,31 +39,5 @@ export function parseFreezeParams(slug: string | undefined, url: URL): FreezePar
     nonce,
     validUntil,
     threshold: action === "SetSoftFreezeThreshold" ? threshold : undefined,
-  };
-}
-
-export function parseVetoParams(id: string | undefined, url: URL): VetoParams {
-  const q = url.searchParams;
-  const field = (name: string) => q.get(name) ?? "";
-  const governor = field("governor");
-  const refund = field("refundRecipient");
-  const values = {
-    l2ProposalId: id ?? "",
-    l2GasLimit: field("l2GasLimit"),
-    l2GasPerPubdataByteLimit: field("l2GasPerPubdataByteLimit"),
-    txMintValue: field("txMintValue"),
-    nonce: field("nonce"),
-  };
-  if (
-    !Object.values(values).every((v) => uint.test(v)) ||
-    !isAddress(governor) ||
-    !isAddress(refund)
-  )
-    throw notFound();
-  requireUint256(values);
-  return {
-    ...values,
-    l2GovernorAddress: getAddress(governor),
-    refundRecipient: getAddress(refund),
   };
 }

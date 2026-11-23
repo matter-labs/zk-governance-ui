@@ -83,7 +83,7 @@ const governance = {
   latestBlock: { number: AS_OF.block, timestamp: AS_OF.timestamp },
   upgradeHandler: ADDRESS,
   securityCouncil: { address: ADDRESS },
-  guardians: { address: ADDRESS },
+  zkFoundation: ADDRESS,
   emergencyUpgradeBoard: { address: ADDRESS },
 };
 const proposal = {
@@ -102,8 +102,8 @@ const upgrade = {
   status: {
     creationTimestamp: 1_780_000_000,
     securityCouncilApprovalTimestamp: 1_780_100_000,
-    guardiansApproval: false,
-    guardiansExtendedLegalVeto: false,
+    zkFoundationApproval: false,
+    zkFoundationExtendedLegalVeto: false,
     executed: true,
   },
   timeline: {
@@ -196,6 +196,7 @@ const upgradeData = (held: unknown) => ({
   freshSets: pending(),
   setEvidence: pending(),
   execution: pending(),
+  zkFoundation: pending(),
   l2Proposal: pending(),
   startedCheck: null,
 });
@@ -246,6 +247,44 @@ describe("the upgrade page's first flush after a pause", () => {
     expect(out).not.toContain('data-testid="fetch-signatures"');
     expect(out).not.toContain("Execute the upgrade");
     expect(out).not.toContain("Send transaction");
+  });
+
+  it("holds the ZK Foundation's steps as rows of the same Approvals table, nothing simulated", () => {
+    const step = (key: string, title: string, functionName: string, selector: string) => ({
+      key,
+      title,
+      state: { status: "closed", detail: "The upgrade was executed" },
+      call: { to: ADDRESS, value: "0", functionName, data: `${selector}${"ab".repeat(32)}` },
+      simulation: null,
+    });
+    const out = firstFlush(
+      Upgrade,
+      upgradeData({
+        ...heldApprovals(),
+        zkFoundation: {
+          safe: ADDRESS,
+          steps: [
+            step("approval", "ZK Foundation approval", "approveUpgradeZkFoundation", "0xb75a2103"),
+            step(
+              "legalVeto",
+              "Legal veto extension (ZK Foundation)",
+              "extendLegalVeto",
+              "0xb429f41c"
+            ),
+          ],
+        },
+      })
+    );
+    // One table: the Security Council's row, then the ZK Foundation's two, in no colour.
+    expect(out).toContain("Approvals <span");
+    expect(out).toMatch(/·\s*3<\/span>/);
+    expect(out).toMatch(
+      /data-testid="approval-groups">(?:(?!<\/section>).)*data-testid="set-securityCouncil"(?:(?!<\/section>).)*data-testid="zk-foundation-approval"(?:(?!<\/section>).)*data-testid="zk-foundation-legalVeto"/
+    );
+    expect(out).toContain("Legal veto extension (ZK Foundation)");
+    expect(out).toContain("Safe transaction");
+    expect(out).not.toContain("simulation-ok");
+    expect(out).not.toContain('data-testid="sign-button"');
   });
 
   it("holds nothing kept with another block's upgrade, or nothing kept: their pending state", () => {

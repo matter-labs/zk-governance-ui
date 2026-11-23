@@ -2727,12 +2727,6 @@
   },
   {
     "type": "function",
-    "name": "GUARDIANS",
-    "inputs": [],
-    "abi": "IEmergencyUpgradeBoard"
-  },
-  {
-    "type": "function",
     "name": "PROTOCOL_UPGRADE_HANDLER",
     "inputs": [],
     "abi": "IEmergencyUpgradeBoard"
@@ -2764,7 +2758,6 @@
         ]
       },
       { "name": "_salt", "type": "bytes32" },
-      { "name": "_guardiansSignatures", "type": "bytes" },
       { "name": "_securityCouncilSignatures", "type": "bytes" },
       { "name": "_zkFoundationSignatures", "type": "bytes" }
     ],
@@ -2949,171 +2942,6 @@
     "name": "updateSecurityCouncil",
     "inputs": [{ "name": "_newSecurityCouncil", "type": "address" }],
     "abi": "IGovernance"
-  },
-  {
-    "type": "function",
-    "name": "APPROVE_UPGRADE_GUARDIANS_THRESHOLD",
-    "inputs": [],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "CANCEL_L2_GOVERNOR_PROPOSAL_THRESHOLD",
-    "inputs": [],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "EIP1271_THRESHOLD",
-    "inputs": [],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "EXTEND_LEGAL_VETO_THRESHOLD",
-    "inputs": [],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "PROPOSE_L2_GOVERNOR_PROPOSAL_THRESHOLD",
-    "inputs": [],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "ZKSYNC_ERA",
-    "inputs": [],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "approveUpgradeGuardians",
-    "inputs": [
-      { "name": "_id", "type": "bytes32" },
-      { "name": "_signers", "type": "address[]" },
-      { "name": "_signatures", "type": "bytes[]" }
-    ],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "cancelL2GovernorProposal",
-    "inputs": [
-      {
-        "name": "_l2Proposal",
-        "type": "tuple",
-        "internalType": "struct IGuardians.L2GovernorProposal",
-        "components": [
-          { "name": "targets", "type": "address[]" },
-          { "name": "values", "type": "uint256[]" },
-          { "name": "calldatas", "type": "bytes[]" },
-          { "name": "description", "type": "string" }
-        ]
-      },
-      {
-        "name": "_txRequest",
-        "type": "tuple",
-        "internalType": "struct IGuardians.TxRequest",
-        "components": [
-          { "name": "to", "type": "address" },
-          { "name": "l2GasLimit", "type": "uint256" },
-          { "name": "l2GasPerPubdataByteLimit", "type": "uint256" },
-          { "name": "refundRecipient", "type": "address" },
-          { "name": "txMintValue", "type": "uint256" }
-        ]
-      },
-      { "name": "_signers", "type": "address[]" },
-      { "name": "_signatures", "type": "bytes[]" }
-    ],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "checkSignatures",
-    "inputs": [
-      { "name": "_digest", "type": "bytes32" },
-      { "name": "_signers", "type": "address[]" },
-      { "name": "_signatures", "type": "bytes[]" },
-      { "name": "_threshold", "type": "uint256" }
-    ],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "extendLegalVeto",
-    "inputs": [
-      { "name": "_id", "type": "bytes32" },
-      { "name": "_signers", "type": "address[]" },
-      { "name": "_signatures", "type": "bytes[]" }
-    ],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "hashL2Proposal",
-    "inputs": [
-      {
-        "name": "_l2Proposal",
-        "type": "tuple",
-        "internalType": "struct IGuardians.L2GovernorProposal",
-        "components": [
-          { "name": "targets", "type": "address[]" },
-          { "name": "values", "type": "uint256[]" },
-          { "name": "calldatas", "type": "bytes[]" },
-          { "name": "description", "type": "string" }
-        ]
-      }
-    ],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "isValidSignature",
-    "inputs": [
-      { "name": "_digest", "type": "bytes32" },
-      { "name": "_signature", "type": "bytes" }
-    ],
-    "abi": "IGuardians"
-  },
-  {
-    "type": "function",
-    "name": "members",
-    "inputs": [{ "name": "", "type": "uint256" }],
-    "abi": "IGuardians"
-  },
-  { "type": "function", "name": "nonce", "inputs": [], "abi": "IGuardians" },
-  {
-    "type": "function",
-    "name": "proposeL2GovernorProposal",
-    "inputs": [
-      {
-        "name": "_l2Proposal",
-        "type": "tuple",
-        "internalType": "struct IGuardians.L2GovernorProposal",
-        "components": [
-          { "name": "targets", "type": "address[]" },
-          { "name": "values", "type": "uint256[]" },
-          { "name": "calldatas", "type": "bytes[]" },
-          { "name": "description", "type": "string" }
-        ]
-      },
-      {
-        "name": "_txRequest",
-        "type": "tuple",
-        "internalType": "struct IGuardians.TxRequest",
-        "components": [
-          { "name": "to", "type": "address" },
-          { "name": "l2GasLimit", "type": "uint256" },
-          { "name": "l2GasPerPubdataByteLimit", "type": "uint256" },
-          { "name": "refundRecipient", "type": "address" },
-          { "name": "txMintValue", "type": "uint256" }
-        ]
-      },
-      { "name": "_signers", "type": "address[]" },
-      { "name": "_signatures", "type": "bytes[]" }
-    ],
-    "abi": "IGuardians"
   },
   { "type": "function", "name": "DEPOSIT_SIZE", "inputs": [], "abi": "IKiln" },
   {
@@ -5081,6 +4909,38 @@
   },
   {
     "type": "function",
+    "name": "EIP1271_THRESHOLD",
+    "inputs": [],
+    "abi": "ISecurityCouncil"
+  },
+  {
+    "type": "function",
+    "name": "checkSignatures",
+    "inputs": [
+      { "name": "_digest", "type": "bytes32" },
+      { "name": "_signers", "type": "address[]" },
+      { "name": "_signatures", "type": "bytes[]" },
+      { "name": "_threshold", "type": "uint256" }
+    ],
+    "abi": "ISecurityCouncil"
+  },
+  {
+    "type": "function",
+    "name": "isValidSignature",
+    "inputs": [
+      { "name": "_digest", "type": "bytes32" },
+      { "name": "_signature", "type": "bytes" }
+    ],
+    "abi": "ISecurityCouncil"
+  },
+  {
+    "type": "function",
+    "name": "members",
+    "inputs": [{ "name": "", "type": "uint256" }],
+    "abi": "ISecurityCouncil"
+  },
+  {
+    "type": "function",
     "name": "APPROVE_UPGRADE_SECURITY_COUNCIL_THRESHOLD",
     "inputs": [],
     "abi": "ISecurityCouncil"
@@ -7026,12 +6886,6 @@
   },
   {
     "type": "function",
-    "name": "approveUpgradeGuardians",
-    "inputs": [{ "name": "_id", "type": "bytes32" }],
-    "abi": "ProtocolUpgradeHandler"
-  },
-  {
-    "type": "function",
     "name": "approveUpgradeSecurityCouncil",
     "inputs": [{ "name": "_id", "type": "bytes32" }],
     "abi": "ProtocolUpgradeHandler"
@@ -7102,12 +6956,6 @@
   },
   {
     "type": "function",
-    "name": "guardians",
-    "inputs": [],
-    "abi": "ProtocolUpgradeHandler"
-  },
-  {
-    "type": "function",
     "name": "hardFreeze",
     "inputs": [],
     "abi": "ProtocolUpgradeHandler"
@@ -7117,7 +6965,7 @@
     "name": "initialize",
     "inputs": [
       { "name": "_securityCouncil", "type": "address" },
-      { "name": "_guardians", "type": "address" },
+      { "name": "_zkFoundation", "type": "address" },
       { "name": "_emergencyUpgradeBoard", "type": "address" }
     ],
     "abi": "ProtocolUpgradeHandler"
@@ -7204,12 +7052,6 @@
     "type": "function",
     "name": "updateEmergencyUpgradeBoard",
     "inputs": [{ "name": "_newEmergencyUpgradeBoard", "type": "address" }],
-    "abi": "ProtocolUpgradeHandler"
-  },
-  {
-    "type": "function",
-    "name": "updateGuardians",
-    "inputs": [{ "name": "_newGuardians", "type": "address" }],
     "abi": "ProtocolUpgradeHandler"
   },
   {

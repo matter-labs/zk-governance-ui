@@ -54,7 +54,6 @@ describe("mainnet, read-only", () => {
     // Rebuilding the calldata from Safe's copies of those six signers reproduces the inner call.
     const usedSigners = new Set(council.used?.map((u) => u.signer));
     const rebuilt = approvalExecution(
-      "ApproveUpgradeSecurityCouncil",
       detail.governance.securityCouncil.address,
       UPGRADE_ID,
       council.set.valid.filter((s) => usedSigners.has(s.signer))
@@ -90,8 +89,8 @@ describe("mainnet, read-only", () => {
       expect(executed.idMatches).toBe(true);
       expect(upgradeProposalId(executed.proposal)).toBe(id);
 
-      // The same id is what council and guardian members signed in their Safes, and the
-      // signatures the execution used are byte-identical to Safe's copies.
+      // The same id is what council members signed in their Safes, and the signatures the
+      // execution used are byte-identical to Safe's copies.
       for (const role of detail.roles.filter((r) => r.key !== "zkFoundation")) {
         const signedInSafe = role.set.members.filter((m) => m.source === "safe");
         expect(signedInSafe.length).toBeGreaterThanOrEqual(role.set.threshold);
@@ -99,7 +98,9 @@ describe("mainnet, read-only", () => {
         expect(role.used?.length).toBeGreaterThanOrEqual(role.set.threshold);
         expect(role.used?.every((u) => u.matchesSafe === true)).toBe(true);
       }
-      // All three of EmergencyUpgradeBoard's checks accept the used signatures before execution.
+      // Through a board from before ZIP-19: its Security Council and ZK Foundation checks (those
+      // shown) accept the used signatures before execution.
+      expect(executed.beforeZip19).toBe(true);
       expect(executed.historical?.checks.every((c) => c.accepted)).toBe(true);
     }
   });

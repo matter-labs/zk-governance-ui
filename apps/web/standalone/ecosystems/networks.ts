@@ -25,7 +25,7 @@ type Ecosystem = {
       rpcUrl: string;
       explorerUrl: string | null;
       diamond: Address;
-      governors: { protocol: Address | null; token: Address | null; govOps: Address | null };
+      governors: { protocol: Address | null };
       governorsFirstLogBlock: number | null;
       governorsDeployBlock: number | null;
     };
@@ -54,7 +54,7 @@ NETWORKS[n.chainId] = {
   tallyUrl: n.tallyUrl,
   l2RpcUrl: n.l2.rpcUrl,
   l2ExplorerUrl: n.l2.explorerUrl,
-  l2Governors: n.l2.governors,
+  l2Governors: { protocol: n.l2.governors.protocol },
   l2GovernorsFirstLogBlock: block(n.l2.governorsFirstLogBlock),
   l2GovernorsDeployBlock: block(n.l2.governorsDeployBlock),
   logCanary: pinned.logCanary && {

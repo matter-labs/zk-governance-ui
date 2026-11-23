@@ -14,11 +14,11 @@ import {
 } from "viem";
 import { beforeEach, expect, it, vi } from "vitest";
 
-// The L2 proposals Guardians can veto: a proposal whose state() read fails must not silently drop
-// out of the vetoable list (nor close its veto); the list fails instead.
+// An L2 proposal of the protocol governor, scanned on demand: a proposal whose state() read fails
+// must not be shown without a state (null is only a value outside IGovernor.ProposalState); the
+// read fails instead.
 
-const TOKEN_GOVERNOR: Address = "0x0000000000000000000000000000000000000a01";
-const GUARDIANS: Address = "0x0000000000000000000000000000000000000a02";
+const PROTOCOL_GOVERNOR: Address = "0x0000000000000000000000000000000000000a01";
 
 const proposal = {
   targets: ["0x0000000000000000000000000000000000000b01"] as Address[],
@@ -67,12 +67,14 @@ vi.mock("@/.server/logs", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/.server/logs")>()),
   findBlockByTimestamp: async () => 1n,
   getLogs: async (_client: unknown, filter: { address: string }) =>
-    filter.address === TOKEN_GOVERNOR ? [log] : [],
+    filter.address === PROTOCOL_GOVERNOR ? [log] : [],
 }));
 
 const client = {
   getBlock: async () => ({ number: 1_000n, timestamp: 10_000_000n }),
   readContract: async ({ functionName }: { functionName: string }) => {
+    if (functionName === "proposalSnapshot") return 100n;
+    if (functionName === "votingDelay") return 0n;
     if (functionName !== "state") throw new Error(`unexpected ${functionName}`);
     if (state.l2State instanceof Error) throw state.l2State;
     return state.l2State;
@@ -80,39 +82,29 @@ const client = {
 } as unknown as PublicClient;
 
 vi.mock("@/.server/rpc", () => ({
+  // No Era RPC URL of its own: the governor is not indexed, so it is scanned on demand.
   network: async () => ({
     chainId: 1,
     isDevNode: false,
-    l2Governors: { token: TOKEN_GOVERNOR, govOps: null, protocol: null },
+    l2Governors: { protocol: PROTOCOL_GOVERNOR },
   }),
   l2: async () => client,
-  l1: { readContract: async () => proposalId },
-}));
-vi.mock("@/.server/governance", () => ({
-  governance: async () => ({ guardians: { address: GUARDIANS } }),
 }));
 
-const { activeL2Proposals } = await import("@/.server/flows/l2");
+const { getL2Proposal } = await import("@/.server/flows/l2");
 
 beforeEach(() => {
   clearCache();
   state.l2State = 1;
 });
 
-it("lists an Active proposal with its checked id", async () => {
-  const [listed, ...rest] = await activeL2Proposals();
-  expect(rest).toEqual([]);
-  expect(listed).toMatchObject({
+it("reads an Active proposal with its checked id", async () => {
+  expect(await getL2Proposal(PROTOCOL_GOVERNOR, proposalId)).toMatchObject({
+    governorName: "ZkProtocolGovernor",
     proposalId: proposalId.toString(),
     state: "Active",
     idMatchesLocal: true,
-    idMatchesContract: true,
   });
-});
-
-it("drops a proposal only for a state it can no longer be vetoed in", async () => {
-  state.l2State = 7; // Executed
-  expect(await activeL2Proposals()).toEqual([]);
 });
 
 it.each([
@@ -128,7 +120,7 @@ it.each([
       ),
   ],
   ["a network failure", () => new Error("fetch failed")],
-])("fails the list when the state read fails with %s", async (_name, error) => {
+])("fails the read when the state read fails with %s", async (_name, error) => {
   state.l2State = error();
-  await expect(activeL2Proposals()).rejects.toThrow();
+  await expect(getL2Proposal(PROTOCOL_GOVERNOR, proposalId)).rejects.toThrow();
 });

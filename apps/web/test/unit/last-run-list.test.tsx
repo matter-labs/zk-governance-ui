@@ -31,7 +31,7 @@ const upgrade = (n: number) => ({
   stateLabel: "Done",
   createdAt: 1_700_000_000,
   approvedBySecurityCouncil: true,
-  approvedByGuardians: false,
+  approvedByZkFoundation: false,
   legalVetoExtended: false,
 });
 

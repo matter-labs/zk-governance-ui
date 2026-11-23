@@ -8,9 +8,9 @@ import { FakeRpcError, type FakePost } from "../support/fake-jsonrpc";
 import { type FakeL1Options, L1, REVERTS, SC_MEMBERS, fakeL1 } from "../support/fake-l1";
 
 // Governance in one round: with the last read's layout, every getter goes out in ONE POST at the
-// head's block (4 billed entries). It is taken only if the handler names the same contracts, every
-// sub-call answered, and both terminators definitely reverted; otherwise the read goes in rounds,
-// and answers exactly as a read in rounds does.
+// head's block (3 billed entries). It is taken only if the handler names the same contracts, every
+// sub-call answered, and the members list's terminator definitely reverted; otherwise the read goes
+// in rounds, and answers exactly as a read in rounds does.
 
 const NOW = 1_800_000_000_000;
 const HEAD = 26_129_107n;
@@ -93,14 +93,15 @@ describe("governance in one round", () => {
     expect(fake.calls.every((c) => c.block === TAG)).toBe(true);
   });
 
-  it("then reads everything in one POST of four billed entries at the head's block, with the same answer", async () => {
+  it("then reads everything in one POST of three billed entries at the head's block, with the same answer", async () => {
     const rounds = await measured(() => readGovernance());
     const one = await measured(() => readGovernance());
     expect(one.rounds).toBe(1);
     expect(one.posts).toHaveLength(1);
     const [post] = one.posts as [FakePost];
-    expect(methods(post).sort()).toEqual(["eth_call", "eth_call", "eth_call", "eth_getCode"]);
-    // The aggregate3 of every getter, and both terminators asked directly, at the head's block.
+    expect(methods(post).sort()).toEqual(["eth_call", "eth_call", "eth_getCode"]);
+    // The aggregate3 of every getter, and the council's terminator asked directly, at the head's
+    // block.
     const targets = post.calls.map((c) => c.params[0] as { to?: string } | string);
     expect(
       targets.map((t) => (typeof t === "string" ? t : t.to ?? "").toLowerCase()).sort()
@@ -109,7 +110,6 @@ describe("governance in one round", () => {
         L1.upgradeHandler.toLowerCase(),
         MULTICALL3.toLowerCase(),
         L1.securityCouncil.toLowerCase(),
-        L1.guardians.toLowerCase(),
       ].sort()
     );
     expect(post.calls.every((c) => c.params.includes(TAG))).toBe(true);
@@ -198,16 +198,16 @@ describe("governance in one round", () => {
     expect(lagging).toBe(0);
     // Then the same single POST once more: no rounds at a block that backend did not know.
     expect(again.posts).toHaveLength(1);
-    expect((again.posts[0] as FakePost).calls).toHaveLength(4);
+    expect((again.posts[0] as FakePost).calls).toHaveLength(3);
     expect(again.value).toEqual(first.value);
   });
 
   it("falls back to rounds when a getter fails inside the aggregate", async () => {
     const first = await measured(() => readGovernance());
-    // The Guardians' domain fails once inside Multicall3; its direct read answers.
+    // The board's domain fails once inside Multicall3; its direct read answers.
     let failures = 1;
     options.inject = (call) =>
-      call.to === L1.guardians &&
+      call.to === L1.emergencyUpgradeBoard &&
       call.functionName === "eip712Domain" &&
       call.viaMulticall &&
       failures-- > 0
@@ -220,35 +220,35 @@ describe("governance in one round", () => {
 });
 
 describe("a handler this build cannot show", () => {
-  const ZKF = getAddress("0xbC1653bd3829dfEc575AfC3816D4899cd103B51c");
-  // The handler after the Guardians' removal (zk-governance #51): guardians() is gone (it reverts)
-  // and zkFoundation() answers.
-  const withoutGuardians = (call: { to: Address; functionName: string }) =>
-    call.to === L1.upgradeHandler && call.functionName === "guardians"
+  const GUARDIANS = getAddress("0x600dA620Ab29F41ABC6596a15981e14cE58c86b8");
+  // The handler from before ZIP-19: zkFoundation() is not there yet (it reverts) and guardians()
+  // answers.
+  const beforeZip19 = (call: { to: Address; functionName: string }) =>
+    call.to === L1.upgradeHandler && call.functionName === "zkFoundation"
       ? REVERTS
-      : call.to === L1.upgradeHandler && call.functionName === "zkFoundation"
-        ? ZKF
+      : call.to === L1.upgradeHandler && call.functionName === "guardians"
+        ? GUARDIANS
         : undefined;
 
-  it("the handler without Guardians: says so, never an RPC-looking failure (in one round and in rounds)", async () => {
+  it("the handler from before ZIP-19: says so, never an RPC-looking failure (in one round and in rounds)", async () => {
     await measured(() => readGovernance());
-    options.answer = withoutGuardians;
+    options.answer = beforeZip19;
     // The last read's layout is guessed first: its aggregate fails, then the rounds tell why.
     const again = await settle(readGovernance()).catch((error: unknown) => error);
     expect(again).toBeInstanceOf(UnsupportedHandlerError);
     expect((again as Error).message).toContain(L1.upgradeHandler);
-    expect((again as Error).message).toContain(ZKF);
+    expect((again as Error).message).toContain(GUARDIANS);
     // A fresh process (rounds only): the same.
     clearCache();
     resetRpcClients();
     node();
-    options.answer = withoutGuardians;
+    options.answer = beforeZip19;
     await expect(settle(readGovernance())).rejects.toBeInstanceOf(UnsupportedHandlerError);
   });
 
   it("today's handler with a failing getter: that failure, not an unsupported handler", async () => {
     options.inject = (call) =>
-      call.to === L1.upgradeHandler && call.functionName === "guardians"
+      call.to === L1.upgradeHandler && call.functionName === "zkFoundation"
         ? new FakeRpcError(-32603, "internal error")
         : undefined;
     const error = await settle(readGovernance()).catch((e: unknown) => e);

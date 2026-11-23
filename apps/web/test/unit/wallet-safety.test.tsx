@@ -1,5 +1,4 @@
 import { longValidityWarning } from "@/common/freeze";
-import { vetoValueWarnings, VETO_DEFAULTS } from "@/common/veto";
 import { StatusProblem } from "@/components/app-shell";
 import { isSafeWalletPeer } from "@/components/connect-button";
 import { ChainContext } from "@/components/governance-context";
@@ -28,7 +27,6 @@ vi.mock("@/components/governance-context", async (importOriginal) => ({
     ok: true,
     governance: {
       securityCouncil: { members: [MEMBER] },
-      guardians: { members: [] },
       emergencyUpgradeBoard: { zkFoundation: "0x0000000000000000000000000000000000000009" },
     },
   }),
@@ -213,22 +211,6 @@ describe("the review before signing", () => {
 });
 
 describe("what the page says about the values it is given", () => {
-  it("flags veto link values that cannot work or lose funds", () => {
-    const ok = { ...VETO_DEFAULTS, refundRecipient: SENDER };
-    expect(vetoValueWarnings(ok)).toEqual([]);
-    const odd = vetoValueWarnings({
-      l2GasLimit: (10n ** 27n).toString(),
-      l2GasPerPubdataByteLimit: "1",
-      txMintValue: (10n ** 30n).toString(),
-      refundRecipient: "0x0000000000000000000000000000000000000000",
-    });
-    expect(odd).toHaveLength(4);
-    expect(odd.join(" ")).toMatch(/far above.*accepts only 800.*more than 1 ETH.*zero address/);
-    expect(vetoValueWarnings({ ...ok, txMintValue: "0" })).toEqual([
-      "The mint value is 0: it cannot pay for the L1 → L2 transaction.",
-    ]);
-  });
-
   it("flags a freeze request valid for more than a week", () => {
     const now = 1_790_000_000;
     expect(longValidityWarning(now + 2 * 86_400, now)).toBeNull();

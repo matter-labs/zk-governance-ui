@@ -1,16 +1,18 @@
 import { type Address, type Hex, toEventSelector } from "viem";
 
-// Trust anchors pinned per chain. Everything else (Security Council, Guardians, Emergency Upgrade
-// Board, members, thresholds, nonces) is read from the ProtocolUpgradeHandler on every load, so a
-// change of council is picked up without a release.
+// Trust anchors pinned per chain. Everything else (Security Council, ZK Foundation, Emergency
+// Upgrade Board, members, thresholds, nonces) is read from the ProtocolUpgradeHandler on every load,
+// so a change of council is picked up without a release.
 //
 // Sources, checked 2026-10-01 against the chain itself:
 // - Mainnet ProtocolUpgradeHandler: zksync-association brief; its ChangeSecurityCouncil(0x0 → …)
 //   event at block 21788382 marks the deployment and doubles as the log-history canary.
-// - L2 governors: docs.zknation.io "ZKsync Governance Contract Addresses". The protocol governor
-//   is cross-checked on-chain: ZkProtocolGovernor.timelock() == ProtocolUpgradeHandler.L2_PROTOCOL_GOVERNOR.
-// - L2 governor log blocks (one eth_getLogs over the three governors from Era genesis, 2026-10-06):
-//   the first ProposalCreated/Executed/Canceled log, and the first log of any kind (deployment).
+// - L2 protocol governor: docs.zknation.io "ZKsync Governance Contract Addresses", cross-checked
+//   on-chain: ZkProtocolGovernor.timelock() == ProtocolUpgradeHandler.L2_PROTOCOL_GOVERNOR. The
+//   Token and GovOps governors are not read: their veto belongs to the ZK Foundation's own Safe on
+//   ZKsync Era since TPP-20 and GAP-7 (ZIP-19 dissolved the Guardians), a Safe transaction on Era.
+// - L2 governor log blocks (eth_getLogs over the protocol governor from Era genesis, 2026-11-16):
+//   its first ProposalCreated/Executed/Canceled log, and its first log of any kind (deployment).
 // - Sepolia ProtocolUpgradeHandler 0x7444…: apps/web/docs (removed). The one listed in the docs
 //   (0xe3a6…) is a proxy whose implementation no longer has handler functions. Other Sepolia
 //   handlers answer the handler ABI too (testnet's 0x803e5E7aF1FDD504F8844E28a249203Cfa7c471D,
@@ -22,7 +24,6 @@ export type NetworkName = "mainnet" | "sepolia" | "local";
 // fast path used (the ZK Foundation Safe's: while its singleton and fallback handler match too).
 export type CodePins = {
   securityCouncil: Hex;
-  guardians: Hex;
   emergencyUpgradeBoard: Hex;
   /** Safe 1.3.0 proxy runtime code (every member Safe's and the ZK Foundation's). */
   safeProxy: Hex;
@@ -33,7 +34,7 @@ export type CodePins = {
    * The councils' code in a release the handler is about to switch to, deployed ahead of the
    * switch: pinned too, so pages keep reading governance at each head across it (chain/pins.ts).
    */
-  next?: Pick<CodePins, "securityCouncil" | "guardians" | "emergencyUpgradeBoard">;
+  next?: Pick<CodePins, "securityCouncil" | "emergencyUpgradeBoard">;
 };
 
 export type NetworkConfig = {
@@ -46,8 +47,8 @@ export type NetworkConfig = {
   safeTxServiceUrl: string | null;
   safeWalletPrefix: string | null;
   l2RpcUrl: string | null;
-  l2Governors: { protocol: Address | null; token: Address | null; govOps: Address | null };
-  // Where the L2 governors' log index starts (else their deployment). Both null: no index (every
+  l2Governors: { protocol: Address | null };
+  // Where the L2 governor's log index starts (else its deployment). Both null: no index (the
   // governor is read on demand).
   l2GovernorsFirstLogBlock: bigint | null;
   l2GovernorsDeployBlock: bigint | null;
@@ -76,11 +77,7 @@ export const NETWORKS: Record<1 | 11155111, NetworkConfig> = {
     safeTxServiceUrl: "https://api.safe.global/tx-service/eth",
     safeWalletPrefix: "eth",
     l2RpcUrl: "https://mainnet.era.zksync.io",
-    l2Governors: {
-      protocol: "0x76705327e682F2d96943280D99464Ab61219e34f",
-      token: "0xb83FF6501214ddF40C91C9565d095400f3F45746",
-      govOps: "0xEEEa739a8b6fB1b8f703E23C9Be03CeeA643b160",
-    },
+    l2Governors: { protocol: "0x76705327e682F2d96943280D99464Ab61219e34f" },
     l2GovernorsFirstLogBlock: 49_077_771n,
     l2GovernorsDeployBlock: 41_196_850n,
     explorerUrl: "https://etherscan.io",
@@ -95,23 +92,18 @@ export const NETWORKS: Record<1 | 11155111, NetworkConfig> = {
       blockNumber: 21_788_382n,
     },
     codePins: {
-      securityCouncil: "0x07a16e42a0b772364b7bd47f916d4dde6ac2106132cd0a6023a7284a9b5c1e63",
-      guardians: "0xa169d7c0fe3a79ef97995412a52a2821b95065574c263832f29fd1dd623eba38",
-      emergencyUpgradeBoard: "0x9999af49fff31340fdc41580fd792d782708cdd7749dbd3b6c6148080354c7a3",
+      // The handler after ZIP-19 (Guardians dissolved; upgrade
+      // 0xc334de7ae595405dd6a86ac80a33b0c60a956bd8eb815834167763d462f39933, implementation
+      // 0xaD417a02cD56e535703404DEd7C8c5BaFE088DEE): SecurityCouncil
+      // 0x29D2e773A31C07D375c50F0110422832bd044d08 (v31's, 8 members), the two-party
+      // EmergencyUpgradeBoard 0x3DBD9c38cc4A0D380fE9E32ACE0D2b147aD29FF1 (Security Council + ZK
+      // Foundation), and the ZK Foundation Safe 0xbC1653bd3829dfEc575AfC3816D4899cd103B51c (Safe
+      // 1.3.0). zk-governance vb/remove-guardians-audit-fixes, read on mainnet at block 26,427,348.
+      securityCouncil: "0xc04dd16b6d32e1606135aeb426f33c9487350fdc1faa21cec6ff4abfec5966e3",
+      emergencyUpgradeBoard: "0x7a151987334e3757b74372ecffbbeaddcbba4478e99b8b7d6bf614a06e9abbd5",
       safeProxy: "0xb89c1b3bdf2cf8827818646bce9a8f6e372885f8c55e5c07acbd307cb133b000",
       safeSingleton: "0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552",
       safeFallbackHandler: "0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4",
-      // v31 (ZIP-18 upgrade 0xd0b892663947d43cf35585cd69ac4232273ef3815636bafbe619a49f04cd6520
-      // initializes the handler with them): SecurityCouncil 0x29D2e773A31C07D375c50F0110422832bd044d08
-      // (8 members), Guardians 0x8f525e55F76050d8dFdDa4870DA1b3ede54E908F (vetoes through the
-      // Bridgehub), EmergencyUpgradeBoard 0x91989F9BB8391D3471D2672Ec001921cB14C4b7C. The same
-      // Multisig, typehashes and getters (zk-governance kl/v31-puh-guardians-redeploy), read on
-      // mainnet at block 26,291,245.
-      next: {
-        securityCouncil: "0xc04dd16b6d32e1606135aeb426f33c9487350fdc1faa21cec6ff4abfec5966e3",
-        guardians: "0x28932551517fc5e98c49ca4c9d780d3f2bd4dbce4708eaced13e0fc9f6ce2928",
-        emergencyUpgradeBoard: "0xc801147d31a04644fc188a6cfceb0b5d0f89316ef058ba54f10d041f584dd188",
-      },
     },
   },
   11155111: {
@@ -123,11 +115,7 @@ export const NETWORKS: Record<1 | 11155111, NetworkConfig> = {
     safeTxServiceUrl: "https://api.safe.global/tx-service/sep",
     safeWalletPrefix: "sep",
     l2RpcUrl: "https://sepolia.era.zksync.dev",
-    l2Governors: {
-      protocol: "0x5a6862ee581b6cDb517D24f0a69237f9D900C23C",
-      token: "0x98fF5B31bBa84f5Ad05a7635a436151F74aDa466",
-      govOps: "0x56f6379F945e95558069acb3E945ee3480025605",
-    },
+    l2Governors: { protocol: "0x5a6862ee581b6cDb517D24f0a69237f9D900C23C" },
     l2GovernorsFirstLogBlock: 3_590_083n,
     l2GovernorsDeployBlock: 3_584_343n,
     explorerUrl: "https://sepolia.etherscan.io",
@@ -155,7 +143,7 @@ export function localNetwork(chainId: number): NetworkConfig {
     safeTxServiceUrl: null,
     safeWalletPrefix: null,
     l2RpcUrl: null,
-    l2Governors: { protocol: null, token: null, govOps: null },
+    l2Governors: { protocol: null },
     l2GovernorsFirstLogBlock: null,
     l2GovernorsDeployBlock: null,
     explorerUrl: null,

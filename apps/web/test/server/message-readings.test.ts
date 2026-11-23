@@ -54,7 +54,6 @@ const board = {
 };
 const EMERGENCY = [
   "ExecuteEmergencyUpgradeSecurityCouncil",
-  "ExecuteEmergencyUpgradeGuardians",
   "ExecuteEmergencyUpgradeZKFoundation",
 ] as const;
 

@@ -1,8 +1,10 @@
-import { guardiansAbi, securityCouncilAbi, upgradeHandlerAbi } from "@/common/abis";
+import { securityCouncilAbi, upgradeHandlerAbi } from "@/common/abis";
 import {
+  type Execution,
+  type MemberSignature,
   approvalExecution,
   executeUpgradeExecution,
-  type MemberSignature,
+  zkFoundationCall,
 } from "@/common/execution";
 import {
   type DecodedCall,
@@ -11,12 +13,12 @@ import {
   fromAbi,
   upgradeProposalId,
 } from "@/common/proposal";
+import { type Eip712Domain, buildTypedData, governanceHashes } from "@/common/typed-data";
 import {
-  type ActionName,
-  type Eip712Domain,
-  buildTypedData,
-  governanceHashes,
-} from "@/common/typed-data";
+  ZK_FOUNDATION_STEPS,
+  type ZkFoundationStepKey,
+  zkFoundationStepStatus,
+} from "@/common/zk-foundation";
 import {
   UPGRADE_STATES,
   UPGRADE_STATE_LABELS,
@@ -41,6 +43,7 @@ import { type Network, blockTimestamps, latestBlock, network, refreshHead } from
 import {
   type Freshness,
   type SignatureSet,
+  type Simulation,
   prefetchSafeListings,
   simulate,
   simulateCall,
@@ -135,7 +138,7 @@ export type UpgradeSummary = StartedUpgrade & {
   stateLabel: string;
   createdAt: number;
   approvedBySecurityCouncil: boolean;
-  approvedByGuardians: boolean;
+  approvedByZkFoundation: boolean;
   legalVetoExtended: boolean;
 };
 
@@ -220,8 +223,8 @@ export async function listStandardUpgrades({
         stateLabel: UPGRADE_STATE_LABELS[state],
         createdAt: status.creationTimestamp,
         approvedBySecurityCouncil: status.securityCouncilApprovalTimestamp !== 0,
-        approvedByGuardians: status.guardiansApproval,
-        legalVetoExtended: status.guardiansExtendedLegalVeto,
+        approvedByZkFoundation: status.zkFoundationApproval,
+        legalVetoExtended: status.zkFoundationExtendedLegalVeto,
       };
     })
   );
@@ -370,10 +373,16 @@ async function findStarted(id: Hex, creationTimestamp: number): Promise<StartedU
 }
 
 export type ApprovalSet = {
-  key: "securityCouncil" | "guardians" | "legalVeto";
+  key: "securityCouncil";
   title: string;
   set: SignatureSet;
   state: SetState;
+  /**
+   * While the legal veto period runs: when it ends (unix seconds). Members can sign already (the
+   * signatures are not tied to the upgrade's state), but the handler takes the approval only once
+   * the upgrade is Waiting, so no transaction is built before then.
+   */
+  sendsAfter: number | null;
   execution: ExecutionView | null;
   // For a completed action: the signatures the transaction used, and whether Safe has the same bytes.
   used: UsedSignature[] | null;
@@ -384,13 +393,32 @@ export type ApprovalSet = {
 export type UpgradeTimeline = {
   createdAt: number;
   legalVetoEndsAt: number;
-  /** The last moment to approve: then it expires, or the Guardians' approval takes effect. */
+  /** The last moment to approve: then it expires, or the ZK Foundation's approval takes effect. */
   waitingEndsAt: number;
   approvedAt: number | null;
   readyAt: number | null;
   /** From approval to "Ready" (seconds; 0 on a testnet handler). */
   delaySeconds: number;
 };
+
+/**
+ * What the ZK Foundation does for a standard upgrade: it approves it (the upgrade is then ready a day
+ * after the 30-day waiting period, unless the Security Council approved first) or extends its legal
+ * veto to 7 days. Its Safe calls the handler itself (msg.sender is checked), a Safe transaction its
+ * owners sign in their Safe: no signatures of its own reach the handler, so none are verified here.
+ */
+export type ZkFoundationStep = {
+  key: ZkFoundationStepKey;
+  title: string;
+  /** done: the handler records it (txHash: the transaction that made the call, when found). */
+  state: SetState;
+  /** The call its Safe makes to the handler. */
+  call: Execution;
+  /** While open: the call simulated from the ZK Foundation's Safe at the head; null otherwise. */
+  simulation: Simulation | null;
+};
+
+export type ZkFoundationSteps = { safe: Address; steps: ZkFoundationStep[] };
 
 export type StandardUpgradeDetail = {
   id: Hex;
@@ -401,6 +429,7 @@ export type StandardUpgradeDetail = {
   status: Status;
   timeline: UpgradeTimeline;
   sets: ApprovalSet[];
+  zkFoundation: ZkFoundationSteps;
   execute: ExecutionView | null;
   executedTx: Hex | null;
   /** The execution's block time (unix seconds), when it could be read. */
@@ -411,7 +440,7 @@ export type StandardUpgradeDetail = {
 
 export class UpgradeNotFound extends Error {}
 
-export type StandardUpgradeOverview = Omit<StandardUpgradeDetail, "sets">;
+export type StandardUpgradeOverview = Omit<StandardUpgradeDetail, "sets" | "zkFoundation">;
 
 export type StandardUpgradeCore = Omit<
   StandardUpgradeOverview,
@@ -434,9 +463,7 @@ export async function loadStandardUpgrade(
   // proposal is looked up in the log index (which may wait for the backfill), not after it.
   const overview = await getStandardUpgradeCore(id, {
     onExists: (gov) =>
-      prefetchSafeListings([...gov.securityCouncil.members, ...gov.guardians.members], {
-        page: freshness === "page",
-      }),
+      prefetchSafeListings(gov.securityCouncil.members, { page: freshness === "page" }),
     freshness,
   });
   // A page may show an unconfirmed start (`fromLastRun`, `locatedDirectly`); whatever acts on the
@@ -457,6 +484,9 @@ export async function loadStandardUpgrade(
   const execution = confirmed.then((core) =>
     timedRead(id, "execution", () => getUpgradeExecution(core, freshness === "page"))
   );
+  const zkFoundation = confirmed.then((core) =>
+    timedRead(id, "zk-foundation", () => getZkFoundationSteps(core, freshness === "page"))
+  );
   const l2Proposal = confirmed.then((core) =>
     timedRead(id, "l2-discovery", () =>
       findL2ProposalForUpgrade(id, core.status.creationTimestamp, {
@@ -473,10 +503,21 @@ export async function loadStandardUpgrade(
     freshSets,
     setEvidence,
     execution,
+    zkFoundation,
     l2Proposal,
   ])
     void pending?.catch(() => {});
-  return { overview, startedCheck, evidence, sets, freshSets, setEvidence, execution, l2Proposal };
+  return {
+    overview,
+    startedCheck,
+    evidence,
+    sets,
+    freshSets,
+    setEvidence,
+    execution,
+    zkFoundation,
+    l2Proposal,
+  };
 }
 
 /** JSON waits for the same engine's complete result; the page streams each section separately. */
@@ -485,10 +526,11 @@ export async function getStandardUpgrade(
   options: { supplied?: MemberSignature[] } = {}
 ): Promise<StandardUpgradeDetail> {
   const loading = await loadStandardUpgrade(id, { ...options, freshness: "strict" });
-  const [sets, evidence, execution, l2Proposal] = await Promise.all([
+  const [sets, evidence, execution, zkFoundation, l2Proposal] = await Promise.all([
     loading.freshSets,
     loading.setEvidence,
     loading.execution,
+    loading.zkFoundation,
     loading.l2Proposal.catch(() => null),
   ]);
   return {
@@ -496,6 +538,7 @@ export async function getStandardUpgrade(
     ...execution,
     l2Proposal,
     sets: sets.map((set) => withEvidence(set, evidence)),
+    zkFoundation,
   };
 }
 
@@ -557,7 +600,7 @@ export async function getStandardUpgradeCore(
   );
 
   const vetoDays = BigInt(
-    status.guardiansExtendedLegalVeto ? 7 : gov.network.standardLegalVetoDays
+    status.zkFoundationExtendedLegalVeto ? 7 : gov.network.standardLegalVetoDays
   );
   const created = BigInt(status.creationTimestamp);
   const delay = BigInt(gov.network.upgradeDelayDays ?? 1) * DAY;
@@ -568,7 +611,7 @@ export async function getStandardUpgradeCore(
     approvedAt: status.securityCouncilApprovalTimestamp || null,
     readyAt: status.securityCouncilApprovalTimestamp
       ? status.securityCouncilApprovalTimestamp + Number(delay)
-      : status.guardiansApproval
+      : status.zkFoundationApproval
         ? Number(created + vetoDays * DAY + 30n * DAY + delay)
         : null,
     delaySeconds: Number(delay),
@@ -609,65 +652,87 @@ async function getUpgradeExecution(d: StandardUpgradeCore, page = false) {
 }
 
 function approvalSpecs(d: StandardUpgradeCore) {
-  const { governance: gov, status, state } = d;
+  const { governance: gov, status, state, timeline } = d;
+  // Signatures are gathered from the legal veto period on; the approval is sent once Waiting.
+  const vetoPeriod = state === UPGRADE_STATES.LegalVetoPeriod;
   const specs: {
     key: ApprovalSet["key"];
     title: string;
-    action: Extract<
-      ActionName,
-      "ApproveUpgradeSecurityCouncil" | "ApproveUpgradeGuardians" | "ExtendLegalVetoPeriod"
-    >;
-    group: "securityCouncil" | "guardians";
+    action: "ApproveUpgradeSecurityCouncil";
     threshold: number;
     state: SetState;
-    event:
-      | "UpgradeApprovedBySecurityCouncil"
-      | "UpgradeApprovedByGuardians"
-      | "UpgradeLegalVetoExtended";
+    sendsAfter: number | null;
+    event: "UpgradeApprovedBySecurityCouncil";
   }[] = [
     {
       key: "securityCouncil",
       title: "Security Council approval",
       action: "ApproveUpgradeSecurityCouncil",
-      group: "securityCouncil",
       threshold: gov.securityCouncil.thresholds.approveUpgrade,
       event: "UpgradeApprovedBySecurityCouncil",
       state:
         status.securityCouncilApprovalTimestamp !== 0
           ? { status: "done", detail: "Approved by the Security Council", txHash: null }
-          : state === UPGRADE_STATES.Waiting
+          : state === UPGRADE_STATES.Waiting || vetoPeriod
             ? { status: "open" }
             : { status: "closed", detail: closedReason(state, "Waiting") },
-    },
-    {
-      key: "guardians",
-      title: "Guardians approval",
-      action: "ApproveUpgradeGuardians",
-      group: "guardians",
-      threshold: gov.guardians.thresholds.approveUpgrade,
-      event: "UpgradeApprovedByGuardians",
-      state: status.guardiansApproval
-        ? { status: "done", detail: "Approved by the Guardians", txHash: null }
-        : state === UPGRADE_STATES.Waiting
-          ? { status: "open" }
-          : { status: "closed", detail: closedReason(state, "Waiting") },
-    },
-    {
-      key: "legalVeto",
-      title: "Legal veto extension (Guardians)",
-      action: "ExtendLegalVetoPeriod",
-      group: "guardians",
-      threshold: gov.guardians.thresholds.extendLegalVeto,
-      event: "UpgradeLegalVetoExtended",
-      state: status.guardiansExtendedLegalVeto
-        ? { status: "done", detail: "Legal veto period extended to 7 days", txHash: null }
-        : state === UPGRADE_STATES.LegalVetoPeriod
-          ? { status: "open" }
-          : { status: "closed", detail: "Only possible during the legal veto period" },
+      sendsAfter:
+        vetoPeriod && status.securityCouncilApprovalTimestamp === 0
+          ? timeline.legalVetoEndsAt
+          : null,
     },
   ];
 
   return specs;
+}
+
+/** Each step's state from the upgrade status; open while the handler would take the call. */
+function zkFoundationState(key: ZkFoundationStep["key"], d: StandardUpgradeCore): SetState {
+  const { status, state } = d;
+  const now = zkFoundationStepStatus(key, state, status);
+  if (now === "open") return { status: "open" };
+  if (key === "approval")
+    return now === "done"
+      ? { status: "done", detail: "Approved by the ZK Foundation", txHash: null }
+      : { status: "closed", detail: closedReason(state, "Waiting") };
+  return now === "done"
+    ? { status: "done", detail: "Legal veto period extended to 7 days", txHash: null }
+    : { status: "closed", detail: "Only possible during the legal veto period" };
+}
+
+/**
+ * The ZK Foundation's steps: each one's state, its call (what its Safe's owners sign as a Safe
+ * transaction), the transaction that made it once done, and while open a simulation from the Safe.
+ */
+async function getZkFoundationSteps(
+  d: StandardUpgradeCore,
+  page = false
+): Promise<ZkFoundationSteps> {
+  const { governance: gov, started, id } = d;
+  const safe = gov.zkFoundation;
+  const steps = await Promise.all(
+    ZK_FOUNDATION_STEPS.map(async (spec): Promise<ZkFoundationStep> => {
+      const call = zkFoundationCall(gov.upgradeHandler, spec.functionName, id);
+      let state = zkFoundationState(spec.key, d);
+      if (state.status === "done") {
+        const event = await locateEvent(spec.event, id, gov.network, () =>
+          legacyEvent(gov.upgradeHandler, spec.event, id, BigInt(started.blockNumber))
+        );
+        state = {
+          ...state,
+          txHash: event?.transactionHash ?? null,
+          at: event ? await blockTimeOf(event.blockNumber) : null,
+        };
+      }
+      // From the Safe itself: the handler checks msg.sender, so any other sender reverts.
+      const simulation =
+        state.status === "open"
+          ? await simulateCall({ from: safe, to: call.to, data: call.data }, { keep: true, page })
+          : null;
+      return { key: spec.key, title: spec.title, state, call, simulation };
+    })
+  );
+  return { safe, steps };
 }
 
 export type RecordedApproval = {
@@ -684,17 +749,16 @@ async function getRecordedApprovals(d: StandardUpgradeCore): Promise<RecordedApp
     approvalSpecs(d)
       .filter((s) => s.state.status === "done")
       .map(async (spec) => {
-        const contract = spec.group === "securityCouncil" ? gov.securityCouncil : gov.guardians;
+        const contract = gov.securityCouncil;
         let used: ReturnType<typeof decodeApprovalCall> = null;
         let historical: ApprovalSet["historical"] = null;
         let state = spec.state;
         if (spec.state.status === "done") {
           const event = await locateEvent(spec.event, id, gov.network, async () => {
             // The Security Council approval time is on-chain, so its event is found without a scan.
-            const near =
-              spec.key === "securityCouncil" && status.securityCouncilApprovalTimestamp
-                ? await blockAt(status.securityCouncilApprovalTimestamp)
-                : null;
+            const near = status.securityCouncilApprovalTimestamp
+              ? await blockAt(status.securityCouncilApprovalTimestamp)
+              : null;
             return legacyEvent(
               gov.upgradeHandler,
               spec.event,
@@ -704,19 +768,17 @@ async function getRecordedApprovals(d: StandardUpgradeCore): Promise<RecordedApp
             );
           });
           const txHash = event?.transactionHash ?? null;
-          // When: the Security Council's approval time is on-chain; the others', their block's.
-          const at =
-            spec.key === "securityCouncil" && status.securityCouncilApprovalTimestamp
-              ? String(status.securityCouncilApprovalTimestamp)
-              : event
-                ? await blockTimeOf(event.blockNumber)
-                : null;
+          // When: the Security Council's approval time is on-chain, else its event block's.
+          const at = status.securityCouncilApprovalTimestamp
+            ? String(status.securityCouncilApprovalTimestamp)
+            : event
+              ? await blockTimeOf(event.blockNumber)
+              : null;
           state = { ...spec.state, txHash, at };
           const block = event ? event.blockNumber - 1n : null;
           const sent =
             txHash && block !== null
               ? await approvalSent(
-                  spec,
                   { address: contract.address, domain: contract.domain, threshold: spec.threshold },
                   { txHash, id, block, handler: gov.upgradeHandler }
                 )
@@ -742,27 +804,13 @@ async function getRecordedApprovals(d: StandardUpgradeCore): Promise<RecordedApp
 /** A council an approval went through: its address, EIP-712 domain and the threshold it checked. */
 type ApprovingCouncil = { address: Address; domain: Eip712Domain; threshold: number };
 
-const APPROVAL_CALL: Record<ApprovalSet["key"], string> = {
-  securityCouncil: "approveUpgradeSecurityCouncil",
-  guardians: "approveUpgradeGuardians",
-  legalVeto: "extendLegalVeto",
-};
-
-const THRESHOLD_GETTER: Record<ApprovalSet["key"], string> = {
-  securityCouncil: "APPROVE_UPGRADE_SECURITY_COUNCIL_THRESHOLD",
-  guardians: "APPROVE_UPGRADE_GUARDIANS_THRESHOLD",
-  legalVeto: "EXTEND_LEGAL_VETO_THRESHOLD",
-};
-
 /**
  * The call an approval's transaction made, and the council it went to: today's council, else the
  * one the handler named at the block before it, whose call has the approval's function and id (the
- * Security Council changed at block 25,134,966, and v31 changes it and the Guardians again). That
- * council's own domain and threshold re-check it. Null when neither is found (or that block's state
- * cannot be read).
+ * Security Council changed at block 25,134,966, and again with v31). That council's own domain and
+ * threshold re-check it. Null when neither is found (or that block's state cannot be read).
  */
 async function approvalSent(
-  spec: { key: ApprovalSet["key"]; group: "securityCouncil" | "guardians" },
   today: ApprovingCouncil,
   { txHash, id, block, handler }: { txHash: Hex; id: Hex; block: bigint; handler: Address }
 ): Promise<{ council: ApprovingCouncil; decoded: NonNullable<RecordedApproval["used"]> } | null> {
@@ -774,38 +822,34 @@ async function approvalSent(
   if (toToday) return { council: today, decoded: toToday };
   const earlier = calls.find(
     (call) =>
-      call.decoded?.functionName === APPROVAL_CALL[spec.key] &&
+      call.decoded?.functionName === "approveUpgradeSecurityCouncil" &&
       call.decoded.id.toLowerCase() === id.toLowerCase()
   );
   if (!earlier?.decoded) return null;
   const named = await callFn<Address>({
     address: handler,
     abi: upgradeHandlerAbi,
-    functionName: spec.group,
+    functionName: "securityCouncil",
     blockNumber: block,
   }).catch(() => null);
   if (!named || !isAddressEqual(named, earlier.to)) return null;
-  const council = await earlierCouncil(earlier.to, spec.key, today.domain.chainId).catch(
-    () => null
-  );
+  const council = await earlierCouncil(earlier.to, today.domain.chainId).catch(() => null);
   return council && { council, decoded: earlier.decoded };
 }
 
-/** An earlier council's domain and threshold: constructor-set, kept for good. */
-function earlierCouncil(
-  address: Address,
-  key: ApprovalSet["key"],
-  chainId: number
-): Promise<ApprovingCouncil> {
-  const abi = key === "securityCouncil" ? securityCouncilAbi : guardiansAbi;
-  return cached(`council:${chainId}:${address}:${THRESHOLD_GETTER[key]}`, FOREVER, async () => {
+const APPROVE_THRESHOLD = "APPROVE_UPGRADE_SECURITY_COUNCIL_THRESHOLD";
+
+/** An earlier Security Council's domain and threshold: constructor-set, kept for good. */
+function earlierCouncil(address: Address, chainId: number): Promise<ApprovingCouncil> {
+  const abi = securityCouncilAbi;
+  return cached(`council:${chainId}:${address}:${APPROVE_THRESHOLD}`, FOREVER, async () => {
     const [domain, threshold] = await Promise.all([
       callFn<readonly [Hex, string, string, bigint, Address]>({
         address,
         abi,
         functionName: "eip712Domain",
       }),
-      callFn<bigint>({ address, abi, functionName: THRESHOLD_GETTER[key] }),
+      callFn<bigint>({ address, abi, functionName: APPROVE_THRESHOLD }),
     ]);
     return {
       address: getAddress(address),
@@ -828,11 +872,11 @@ function streamStandardUpgradeSets(
 ): { immediate: Promise<ApprovalSet[]>; fresh: Promise<ApprovalSet[]> } {
   const { governance: gov, id } = d;
   const each = approvalSpecs(d).map((spec) => {
-    const contract = spec.group === "securityCouncil" ? gov.securityCouncil : gov.guardians;
+    const contract = gov.securityCouncil;
     const streamed = streamSignatureSet(
       {
         action: spec.action,
-        signerGroup: spec.group,
+        signerGroup: "securityCouncil",
         typedData: buildTypedData(spec.action, contract.domain, { id }),
         members: contract.members,
         threshold: spec.threshold,
@@ -847,6 +891,7 @@ function streamStandardUpgradeSets(
       title: spec.title,
       set,
       state: spec.state,
+      sendsAfter: spec.sendsAfter,
       execution,
       used: null,
       historical: null,
@@ -857,7 +902,9 @@ function streamStandardUpgradeSets(
         await executionFor(
           set,
           spec.state,
-          (valid) => approvalExecution(spec.action, contract.address, id, valid),
+          // Not before the legal veto period ends: the handler would reject it.
+          (valid) =>
+            spec.sendsAfter === null ? approvalExecution(contract.address, id, valid) : null,
           { page: freshness === "page" }
         )
       )
@@ -913,7 +960,7 @@ async function recheck(
     // checkSignatures returns nothing; callFn requires code at the block for its success to count.
     await callFn({
       address: contract,
-      abi: guardiansAbi,
+      abi: securityCouncilAbi,
       functionName: "checkSignatures",
       args: [set.hashes.digest, [...used.signers], [...used.signatures], BigInt(set.threshold)],
       blockNumber: block,

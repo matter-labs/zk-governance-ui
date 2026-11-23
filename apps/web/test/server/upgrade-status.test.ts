@@ -65,8 +65,8 @@ describe("current upgrade status", () => {
       status: {
         creationTimestamp: 1_700_000_000,
         securityCouncilApprovalTimestamp: 0,
-        guardiansApproval: false,
-        guardiansExtendedLegalVeto: false,
+        zkFoundationApproval: false,
+        zkFoundationExtendedLegalVeto: false,
         executed: false,
       },
     });

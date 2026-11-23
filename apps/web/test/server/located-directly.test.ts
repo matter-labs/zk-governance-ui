@@ -117,13 +117,7 @@ const GOVERNANCE = {
     eip1271Threshold: 9,
     domain: domain("SecurityCouncil"),
   },
-  guardians: {
-    address: PUH,
-    members: [],
-    thresholds: { approveUpgrade: 5, extendLegalVeto: 2 },
-    eip1271Threshold: 5,
-    domain: domain("Guardians"),
-  },
+  zkFoundation: "0x0000000000000000000000000000000000000f00",
   // The board is the handler's address here, so the fake transactions are sent to it.
   emergencyUpgradeBoard: {
     address: PUH,
@@ -219,7 +213,7 @@ function withEmergencyProposals(history: PuhHistory): PuhHistory {
 }
 
 const calldata = (i: number) =>
-  emergencyExecution(PUH, emergencyProposal(i), [], [], "0x01").data as Hex;
+  emergencyExecution(PUH, emergencyProposal(i), [], "0x01").data as Hex;
 
 const logOf = (history: PuhHistory, topic: Hex, id: Hex) =>
   history.logs.find(

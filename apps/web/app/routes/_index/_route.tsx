@@ -3,7 +3,6 @@ import {
   freezeListContent,
   loaderRevs,
   upgradeListContent,
-  vetoListContent,
 } from "@/.server/sync/content";
 import { type AsOf, lastShown } from "@/.server/sync/last-shown";
 import { watchItems, watchKeys } from "@/.server/sync/presence";
@@ -14,7 +13,6 @@ import {
 } from "@/.server/flows/emergency";
 import { EMERGENCY_RECENT_DAYS } from "@/common/emergency";
 import { type FreezeList, loadFreezeList } from "@/.server/flows/freeze";
-import { type SignedVetoes, type VetoableProposals, loadL2VetoList } from "@/.server/flows/l2-veto";
 import { type UpgradeList, listStandardUpgrades } from "@/.server/flows/standard";
 import { network, l1 } from "@/.server/rpc";
 import { bytes32Pattern } from "@/.server/request";
@@ -36,7 +34,7 @@ import {
   redirect,
 } from "@remix-run/node";
 import { Await, Form, Link, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
-import { AlertTriangle, ArrowRight, Ban, Rocket, ShieldAlert, Snowflake } from "lucide-react";
+import { AlertTriangle, ArrowRight, Rocket, ShieldAlert, Snowflake } from "lucide-react";
 import { type ReactNode, Suspense, useState } from "react";
 import { $path } from "@/utils/path";
 import type { Hex } from "viem";
@@ -82,17 +80,6 @@ const freezeCount = (r: FreezeList) => ({
   source: sourceOf(false, r),
 });
 
-const vetoCount = ([signed, vetoable]: [SignedVetoes, VetoableProposals]) => ({
-  open: signed.vetoes.filter((v) => v.state.status === "open").length,
-  vetoable: vetoable.vetoable.length,
-  incomplete:
-    signed.errors.length > 0 ||
-    signed.anomalies > 0 ||
-    vetoable.l2Error !== null ||
-    vetoable.historyMissing !== null,
-  source: sourceOf(vetoable.fromLastRun, signed),
-});
-
 function counted<T extends { source: SummarySource }>(first: Promise<T>, fresh: () => Promise<T>) {
   const after = first.then((f) => (f.source ? fresh() : null));
   void after.catch(() => {});
@@ -129,7 +116,6 @@ export function loader({ request }: LoaderFunctionArgs) {
   const upgrades = listStandardUpgrades({ allHistory: false, freshness: "page" });
   const emergency = loadEmergencyList({ freshness: "page" });
   const freeze = loadFreezeList({ freshness: "page" });
-  const vetoes = loadL2VetoList({ freshness: "page" });
   const fromSources = {
     upgrades: counted(upgrades.then(upgradeCount), () =>
       listStandardUpgrades({ allHistory: false }).then(upgradeCount)
@@ -143,22 +129,17 @@ export function loader({ request }: LoaderFunctionArgs) {
         ]).then(emergencyCount)
     ),
     freeze: counted(freeze.first.then(freezeCount), () => freeze.fresh.then(freezeCount)),
-    vetoes: counted(Promise.all([vetoes.signed, vetoes.vetoable]).then(vetoCount), () =>
-      Promise.all([vetoes.freshSigned, vetoes.freshVetoable]).then(vetoCount)
-    ),
   };
   const counts = {
     upgrades: shownCount(shown, "upgrades", fromSources.upgrades),
     emergency: shownCount(shown, "emergency", fromSources.emergency, true),
     freeze: shownCount(shown, "freeze", fromSources.freeze, true),
-    vetoes: shownCount(shown, "vetoes", fromSources.vetoes, true),
   };
   const currentList = upgrades.then((first) =>
     first.fromLastRun ? listStandardUpgrades({ allHistory: false }) : first
   );
   const currentPending = emergency.pending.then((p) => (p.stale ? emergency.freshPending : p));
   const currentFreeze = freeze.first.then((f) => (f.stale ? freeze.fresh : f));
-  const currentSigned = vetoes.signed.then((v) => (v.stale ? vetoes.freshSigned : v));
   const revs = loaderRevs([
     [watchKeys.upgrades("45"), currentList.then(upgradeListContent)],
     [
@@ -168,19 +149,12 @@ export function loader({ request }: LoaderFunctionArgs) {
       ),
     ],
     [watchKeys.freezes, currentFreeze.then(freezeListContent)],
-    [
-      watchKeys.vetoes,
-      Promise.all([currentSigned, vetoes.freshVetoable]).then(([signed, vetoable]) =>
-        vetoable.l2Error === null ? vetoListContent(signed, vetoable) : undefined
-      ),
-    ],
   ]);
   return defer({
     watch: watchItems(request, [
       watchKeys.upgrades("45"),
       watchKeys.emergencies(false),
       watchKeys.freezes,
-      watchKeys.vetoes,
     ]),
     revs,
     upgrades: counts.upgrades.first,
@@ -191,9 +165,6 @@ export function loader({ request }: LoaderFunctionArgs) {
     freeze: counts.freeze.first,
     freezeFresh: counts.freeze.fresh,
     freezeAfter: counts.freeze.after,
-    vetoes: counts.vetoes.first,
-    vetoesFresh: counts.vetoes.fresh,
-    vetoesAfter: counts.vetoes.after,
   });
 }
 
@@ -242,7 +213,7 @@ export default function Index() {
             to={$path("/app/proposals")}
             icon={<Rocket />}
             title="Protocol upgrades"
-            description="L2 decisions started on L1, with Security Council or Guardian approval."
+            description="L2 decisions started on L1, with Security Council or ZKsync Foundation approval."
             summary={
               <Deferred
                 value={data.upgrades}
@@ -269,7 +240,7 @@ export default function Index() {
             to={$path("/app/emergency")}
             icon={<ShieldAlert />}
             title="Emergency upgrades"
-            description="Upgrade IDs signed by the Council, Guardians, and ZKsync Foundation."
+            description="Upgrade IDs signed by the Security Council and the ZKsync Foundation."
             summary={
               <Deferred
                 value={data.emergency}
@@ -319,28 +290,6 @@ export default function Index() {
               </Deferred>
             }
             testId="flow-freeze"
-          />
-          <FlowRow
-            to={$path("/app/l2-cancellations")}
-            icon={<Ban />}
-            title="Guardian veto"
-            description="Guardian cancellations of Token or GovOps proposals before execution."
-            summary={
-              <Deferred value={data.vetoes} fresh={data.vetoesFresh} after={data.vetoesAfter}>
-                {(v, note, current) => (
-                  <OverviewSummary
-                    count={v.open}
-                    label="open vetoes"
-                    incomplete={v.incomplete}
-                    detail={v.incomplete ? undefined : `${v.vetoable} L2 proposals can be vetoed`}
-                    note={note}
-                    emphasize={current}
-                    from="safe"
-                  />
-                )}
-              </Deferred>
-            }
-            testId="flow-veto"
           />
         </div>
       </section>

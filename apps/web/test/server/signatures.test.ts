@@ -1,7 +1,7 @@
 import { clearCache, replace } from "@/.server/cache";
 import { CallReverted, NoContract, UndecodableResult, UpstreamError } from "@/.server/chain/call";
 import type { Lane } from "@/.server/chain/jsonrpc";
-import { ERC1271_MAGIC_VALUE, guardiansAbi, safeAbi } from "@/common/abis";
+import { ERC1271_MAGIC_VALUE, safeAbi, securityCouncilAbi } from "@/common/abis";
 import { buildTypedData, governanceHashes } from "@/common/typed-data";
 import {
   type Address,
@@ -323,7 +323,7 @@ beforeEach(() => {
   state.listeners.clear();
   const fake = fakeCallLane(
     contracts({
-      abis: [guardiansAbi, safeAbi],
+      abis: [securityCouncilAbi, safeAbi],
       call: answer,
       code: (address) => (state.codeless.has(getAddress(address)) ? "0x" : "0x6080"),
     }),
@@ -1367,21 +1367,21 @@ describe("simulate", () => {
   });
 
   describe("at the current gas price", () => {
-    // A contract reading tx.gasprice, like Era's Mailbox for a veto's L2 transaction: the value
+    // A contract reading tx.gasprice, like Era's Mailbox for an L1 → L2 transaction: the value
     // sent must cover a cost that grows with it (here 0.02 ETH suffices up to 20 gwei).
     const pricedCall = (call: FakeCall) => {
       const tx = call.params[0] as { value?: Hex; gasPrice?: Hex };
       const cost = BigInt(tx.gasPrice ?? "0x0") * 1_000_000n;
       return BigInt(tx.value ?? "0x0") >= cost ? "0x" : revertWith("msg.value too low");
     };
-    const veto = { ...execution, value: (2n * 10n ** 16n).toString() };
+    const paying = { ...execution, value: (2n * 10n ** 16n).toString() };
 
     it("reverts as sent when the gas price makes the signed value too low", async () => {
       state.lane = fakeCallLane(node(pricedCall)).lane;
       prices.gasPrice = numberToHex(20n * 10n ** 9n);
-      expect(await simulate(veto)).toEqual({ status: "ok" });
+      expect(await simulate(paying)).toEqual({ status: "ok" });
       prices.gasPrice = numberToHex(22n * 10n ** 9n);
-      expect(await simulate(veto)).toEqual({ status: "reverted", error: "msg.value too low" });
+      expect(await simulate(paying)).toEqual({ status: "reverted", error: "msg.value too low" });
     });
 
     it("never prices below the base fee of the block simulated at", async () => {
@@ -1389,7 +1389,7 @@ describe("simulate", () => {
       state.lane = fake.lane;
       prices.gasPrice = numberToHex(10n ** 9n);
       prices.baseFee = numberToHex(30n * 10n ** 9n);
-      expect(await simulate(veto, { keep: true })).toMatchObject({ status: "reverted" });
+      expect(await simulate(paying, { keep: true })).toMatchObject({ status: "reverted" });
       expect((fake.calls()[0]?.params[0] as { gasPrice: Hex }).gasPrice).toBe(prices.baseFee);
     });
 

@@ -1,8 +1,10 @@
 // Your signature: what the viewer can do on a page, under its title, apart from the signer groups
 // (which only show where each group stands). For a connected member Safe, a row per action it can
 // sign, with Review and sign and where its signature stands after; once a group reaches its
-// threshold, a row to send its approval, for anyone. A visitor or a Safe that is not a member gets
-// a line saying so. Scrolled past, the first thing to do stays in a bar at the bottom of the
+// threshold, a row to send its approval, for anyone. For the connected Safe a contract takes a call
+// from (the ZK Foundation's, on a standard upgrade), a row to create that call as a Safe transaction,
+// which its owners confirm and execute in Safe{Wallet}. A visitor or a Safe that is not a member
+// gets a line saying so. Scrolled past, the first thing to do stays in a bar at the bottom of the
 // screen. The same rules as everywhere: a set not verified at the head served is shown as of its
 // block, in no passing colour, and nothing is signed or sent from it (the buttons say why).
 import type { ExecutionView, SetState } from "@/.server/flows/common";
@@ -19,13 +21,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/utils/cn";
-import { formatNumber } from "@/utils/format";
+import { formatNumber, formatTime } from "@/utils/format";
 import type { SerializeFrom } from "@remix-run/node";
 import {
   CheckCircle2,
   ChevronRight,
   Circle,
   CircleDashed,
+  Clock,
   Loader2,
   PenLine,
   Send,
@@ -34,7 +37,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { type Address, type Hex, isAddressEqual } from "viem";
 import { usePageNotCurrent } from "./content-currency";
-import { ExecutionPanel, SentTransaction } from "./execution-panel";
+import { type ExecutionLike, ExecutionPanel, SentTransaction } from "./execution-panel";
 import { checkIncomplete, setStanding } from "./freshness";
 import { SignButton, useSignReason } from "./sign-button";
 import { SafeHashes } from "./safe-hashes";
@@ -53,20 +56,43 @@ export type SignAction = {
   /** The transaction the group's signatures make, once at its threshold (anyone sends it). */
   execution?: Serialized<ExecutionView> | null;
   executionToLabel?: string;
+  /**
+   * When it can be sent, if not yet (unix seconds): a standard upgrade's Security Council approval
+   * gathers signatures during the legal veto period, and is sent once it ends.
+   */
+  sendsAfter?: number | null;
+};
+
+/**
+ * A call only one Safe can make (the contract checks msg.sender): the ZK Foundation's approval or
+ * legal veto extension of a standard upgrade. Offered to that Safe alone, while open.
+ */
+export type SafeCall = {
+  key: string;
+  title: string;
+  /** The one sender the contract accepts. */
+  safe: string;
+  safeLabel: string;
+  state: Serialized<SetState>;
+  /** The call, simulated from that Safe while open. */
+  execution: ExecutionLike;
+  toLabel?: string;
 };
 
 const GROUP_NAME: Record<string, string> = {
   securityCouncil: "the Security Council",
-  guardians: "the Guardians",
   zkFoundation: "the ZKsync Foundation",
 };
 
 export function YourSignature({
   actions,
+  safeCalls = [],
   hint,
   caution,
 }: {
   actions: SignAction[];
+  /** Calls the connected Safe makes itself, when it is the one they must come from. */
+  safeCalls?: SafeCall[];
   /** What to check on the page before signing. */
   hint: string;
   /** Said first in each review before signing (e.g. a payload not checked against the id). */
@@ -78,7 +104,10 @@ export function YourSignature({
   const [panel, setPanel] = useState<HTMLElement | null>(null);
   const past = useScrolledPast(panel);
   const open = actions.filter((a) => a.state.status === "open");
-  if (open.length === 0) return null;
+  const yours = you
+    ? safeCalls.filter((c) => c.state.status === "open" && isAddressEqual(c.safe as Address, you))
+    : [];
+  if (open.length === 0 && yours.length === 0) return null;
 
   const memberOf = (a: SignAction) =>
     you ? a.set.members.find((m) => isAddressEqual(m.member as Address, you)) : undefined;
@@ -88,15 +117,25 @@ export function YourSignature({
   });
   // A first answer from an older block never makes a transaction to send.
   const sending = open.filter((a) => a.execution && a.set.stale !== true);
+  // At its threshold, to be sent later (the legal veto period still runs): said when.
+  const later = open.filter(
+    (a) =>
+      !a.execution &&
+      a.sendsAfter != null &&
+      a.set.stale !== true &&
+      a.set.thresholdCheck.status === "met"
+  );
   const dialogOf = (kind: "sign" | "send", key: string) => ({
     open: dialog === `${kind}:${key}`,
     onOpenChange: (next: boolean) => setDialog(next ? `${kind}:${key}` : null),
   });
-  // What the bar at the bottom offers: the first signature still to give, else the first to send.
+  // What the bar at the bottom offers: the first signature still to give, else the first to send,
+  // else the first call for the connected Safe to create.
   const toSign = signing.find((s) => s.member.status !== "valid");
   const toSend = sending[0];
+  const toCreate = yours[0];
 
-  if (signing.length === 0 && sending.length === 0)
+  if (signing.length === 0 && sending.length === 0 && yours.length === 0 && later.length === 0)
     return (
       <section
         ref={setPanel}
@@ -125,6 +164,14 @@ export function YourSignature({
               <>
                 <PenLine aria-hidden className="h-4 w-4" /> Your signature
               </>
+            ) : yours.length > 0 ? (
+              <>
+                <Send aria-hidden className="h-4 w-4" /> Your Safe's transaction
+              </>
+            ) : sending.length === 0 ? (
+              <>
+                <Clock aria-hidden className="h-4 w-4" /> Threshold met
+              </>
             ) : (
               <>
                 <Send aria-hidden className="h-4 w-4" /> Ready to send
@@ -151,7 +198,30 @@ export function YourSignature({
               dialog={dialogOf("send", action.key)}
             />
           ))}
-          {signing.length === 0 && (
+          {later.map((action) => (
+            <div
+              key={`later:${action.key}`}
+              className="space-y-1 px-4 py-4 sm:px-5"
+              data-testid={`later-row-${action.key}`}
+            >
+              <p className="font-semibold text-[15px] text-navy-800">
+                {action.title} · threshold met
+              </p>
+              <p className="text-[13.5px] text-slate-700">
+                It can be sent once the legal veto period ends,{" "}
+                <span className="font-medium text-navy-800">{formatTime(action.sendsAfter)}</span>.
+                Then anyone can send it: the contract checks the signatures, not the sender.
+              </p>
+            </div>
+          ))}
+          {yours.map((call) => (
+            <SafeCallRow
+              key={`create:${call.key}`}
+              call={call}
+              dialog={dialogOf("send", `create:${call.key}`)}
+            />
+          ))}
+          {signing.length === 0 && yours.length === 0 && (
             <div className="px-4 py-3 text-[13.5px] text-slate-700 sm:px-5">
               <Who you={you} open={open} member={actions.map(memberOf).find(Boolean)} />
             </div>
@@ -163,7 +233,7 @@ export function YourSignature({
           </p>
         )}
       </section>
-      {past && (toSign || toSend) && (
+      {past && (toSign || toSend || toCreate) && (
         <ActionBar>
           {toSign ? (
             <BarSign
@@ -174,6 +244,8 @@ export function YourSignature({
             />
           ) : toSend ? (
             <BarSend action={toSend} onOpen={() => setDialog(`send:${toSend.key}`)} />
+          ) : toCreate ? (
+            <BarCreate call={toCreate} onOpen={() => setDialog(`send:create:${toCreate.key}`)} />
           ) : null}
         </ActionBar>
       )}
@@ -449,6 +521,85 @@ function SendRow({
   );
 }
 
+/** A call for the connected Safe to create: reviewed, then proposed to that Safe from its wallet. */
+function SafeCallRow({
+  call,
+  dialog,
+}: {
+  call: SafeCall;
+  dialog: { open: boolean; onOpenChange: (open: boolean) => void };
+}) {
+  // The page's own item (an upgrade's state) not read at the head served: creating it waits.
+  const page = usePageNotCurrent();
+  // Created in the Safe: said in the row (the review closes), and the page keeps updating, so the
+  // step shows done once the Safe's owners execute it (this row then leaves).
+  const [created, setCreated] = useState<Hex | null>(null);
+  return (
+    <div
+      className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-4 py-4 sm:px-5"
+      data-testid={`create-row-${call.key}`}
+    >
+      <div className="min-w-0 space-y-1">
+        <p className="font-semibold text-[15px] text-navy-800">{call.title}</p>
+        <p className="text-[13.5px] text-slate-700">
+          as <span className="font-semibold text-navy-800">{call.safeLabel}</span>
+        </p>
+        <AddressLink address={call.safe} className="text-[13px]" />
+        <p className="text-[13.5px] text-slate-700">
+          Only this Safe can send it: the contract checks the sender. Its owners confirm and execute
+          it in Safe{"{"}Wallet{"}"}.
+        </p>
+        {page && (
+          <p className="text-slate-600 text-xs" data-testid="send-blocked">
+            {page.reason} {page.waits}
+          </p>
+        )}
+        {created && (
+          <div
+            className="flex items-start gap-2 rounded-lg bg-brand-50 px-3 py-2 text-navy-800 text-sm"
+            role="status"
+            data-testid="safe-tx-in-safe"
+          >
+            <Loader2 aria-hidden className="mt-0.5 h-4 w-4 shrink-0 motion-safe:animate-spin" />
+            <span className="min-w-0">
+              In {call.safeLabel} (safeTxHash <span className="mono break-all">{created}</span>).
+              Once its owners execute it in Safe{"{"}Wallet{"}"}, this page shows it done.
+            </span>
+          </div>
+        )}
+      </div>
+      <Button size="sm" onClick={() => dialog.onOpenChange(true)} data-testid="review-create">
+        <Send /> Review and create
+      </Button>
+      <Dialog open={dialog.open} onOpenChange={dialog.onOpenChange}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create the {call.title.toLowerCase()}</DialogTitle>
+            <DialogDescription>
+              Check where it goes and what it calls, then create it in {call.safeLabel}.
+            </DialogDescription>
+          </DialogHeader>
+          <ExecutionPanel
+            execution={call.execution}
+            title="The transaction"
+            toLabel={call.toLabel}
+            onSafeTransaction={(safeTxHash) => {
+              setCreated(safeTxHash);
+              dialog.onOpenChange(false);
+            }}
+            note={
+              <>
+                Only {call.safeLabel} can send this transaction: the contract checks the sender.
+                Created here, it waits in that Safe for its owners to confirm and execute it.
+              </>
+            }
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 /** Where the viewer's own signature stands, in a line; in no colour when not current. */
 function myStatus(member: Member, set: Serialized<SignatureSet>, staleAt: string | null) {
   const valid = set.valid.length;
@@ -564,6 +715,21 @@ function BarSign({
         data-testid="bar-sign"
       >
         <PenLine /> Review and sign
+      </Button>
+    </>
+  );
+}
+
+function BarCreate({ call, onOpen }: { call: SafeCall; onOpen: () => void }) {
+  return (
+    <>
+      <Send aria-hidden className="h-4 w-4 shrink-0 text-navy-800" />
+      <span className="min-w-0 flex-1 truncate text-[14px] text-slate-700">
+        <span className="font-semibold text-navy-800">{call.title}</span>
+        <span className="hidden sm:inline"> · as {call.safeLabel}</span>
+      </span>
+      <Button size="sm" onClick={onOpen} data-testid="bar-create">
+        <Send /> Review and create
       </Button>
     </>
   );

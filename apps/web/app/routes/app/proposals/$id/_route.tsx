@@ -5,11 +5,13 @@ import { freshAfter } from "@/.server/flows/common";
 import {
   type ApprovalSet,
   type StandardUpgradeCore,
+  type ZkFoundationSteps,
   loadStandardUpgrade,
 } from "@/.server/flows/standard";
 import { parseId } from "@/.server/params";
 import { suppliedSignatures } from "@/.server/request";
 import { UPGRADE_STATES } from "@/common/upgrade-states";
+import { ZK_FOUNDATION_STEPS, zkFoundationStepStatus } from "@/common/zk-foundation";
 import { AddressLink, CopyButton, Hash, TxLink } from "@/components/hex";
 import { EmptyState, LoadingCard, PageHeader, Section } from "@/components/page";
 import { Card } from "@/components/ui/card";
@@ -22,7 +24,12 @@ import {
   provenanceOf,
 } from "@/components/verification/last-run";
 import { ApprovalGroups, SignatureSetCard } from "@/components/verification/signature-set";
-import { YourSignature } from "@/components/verification/your-signature";
+import { type SafeCall, YourSignature } from "@/components/verification/your-signature";
+import {
+  ZkFoundationRows,
+  ZkFoundationRowsNote,
+  zkFoundationSafeCalls,
+} from "@/components/verification/zk-foundation-steps";
 import { type AsOfBlock, AsOfContent, AsOfNote } from "@/components/verification/as-of";
 import {
   NotReReadNote,
@@ -92,23 +99,34 @@ export function loader({ params, request }: LoaderFunctionArgs) {
     ),
     setEvidence: loading.then((d) => d.setEvidence),
     execution: loading.then((d) => d.execution),
+    zkFoundation: loading.then((d) => d.zkFoundation),
     l2Proposal: loading.then((d) => d.l2Proposal),
   });
 }
 
-type HeldApprovals = { sets: ApprovalSet[] };
+// The ZK Foundation's steps as last shown (nothing simulated from them); absent in what was kept
+// before they were.
+type HeldApprovals = { sets: ApprovalSet[]; zkFoundation?: ZkFoundationSteps | null };
 
 async function shownApprovals(
   loading: ReturnType<typeof loadStandardUpgrade>
 ): Promise<HeldApprovals> {
   const d = await loading;
-  const [sets, merged] = await Promise.all([d.freshSets, d.setEvidence.catch(() => null)]);
+  const [sets, merged, zkFoundation] = await Promise.all([
+    d.freshSets,
+    d.setEvidence.catch(() => null),
+    d.zkFoundation.catch(() => null),
+  ]);
   return {
     sets: sets.map((s) => {
       const found = s.state.status === "done" ? merged?.find((e) => e.key === s.key) : undefined;
       // Nothing to send is kept (a held set never offers it).
       return { ...s, ...found, execution: null };
     }),
+    zkFoundation: zkFoundation && {
+      ...zkFoundation,
+      steps: zkFoundation.steps.map((step) => ({ ...step, simulation: null })),
+    },
   };
 }
 
@@ -219,15 +237,23 @@ function Detail({
   asOf?: AsOfBlock | null;
   refresh?: Refresh;
 }) {
-  const { sets, freshSets, setEvidence, execution, l2Proposal, startedCheck, heldApprovals } =
-    useLoaderData<typeof loader>();
+  const {
+    sets,
+    freshSets,
+    setEvidence,
+    execution,
+    zkFoundation,
+    l2Proposal,
+    startedCheck,
+    heldApprovals,
+  } = useLoaderData<typeof loader>();
   // The governance the upgrade was read with: the page never waits on the root status for it.
   const governance = d.governance;
   const provenance = provenanceOf(d.started);
   const labels = {
     [governance.upgradeHandler.toLowerCase()]: "ProtocolUpgradeHandler",
     [governance.securityCouncil.address.toLowerCase()]: "SecurityCouncil",
-    [governance.guardians.address.toLowerCase()]: "Guardians",
+    [governance.zkFoundation.toLowerCase()]: "ZKsync Foundation Safe",
     [governance.emergencyUpgradeBoard.address.toLowerCase()]: "EmergencyUpgradeBoard",
   };
   const now = Number(governance.latestBlock.timestamp);
@@ -264,20 +290,31 @@ function Detail({
           <Await resolve={sets} errorElement={null}>
             {(first) => (
               <UntilFresh stale={first.some((s) => s.set.stale === true)} fresh={freshSets}>
-                {(fresh) => (
-                  <YourSignature
-                    hint="Check what the upgrade does below, then compare the hashes in the review with your hardware wallet."
-                    actions={(fresh ?? first).map((s) => ({
-                      key: s.key,
-                      title: s.title,
-                      set: s.set,
-                      state: s.state,
-                      execution: s.execution,
-                      executionToLabel:
-                        s.key === "securityCouncil" ? "SecurityCouncil" : "Guardians",
-                    }))}
-                  />
-                )}
+                {(fresh) => {
+                  // The ZK Foundation's calls join it once read (for its Safe alone, while open).
+                  const yourSignature = (safeCalls?: SafeCall[]) => (
+                    <YourSignature
+                      hint="Check what the upgrade does below, then compare the hashes in the review with your hardware wallet."
+                      actions={(fresh ?? first).map((s) => ({
+                        key: s.key,
+                        title: s.title,
+                        set: s.set,
+                        state: s.state,
+                        execution: s.execution,
+                        executionToLabel: "SecurityCouncil",
+                        sendsAfter: s.sendsAfter,
+                      }))}
+                      safeCalls={safeCalls}
+                    />
+                  );
+                  return (
+                    <Suspense fallback={yourSignature()}>
+                      <Await resolve={zkFoundation} errorElement={yourSignature()}>
+                        {(steps) => yourSignature(zkFoundationSafeCalls(steps))}
+                      </Await>
+                    </Suspense>
+                  );
+                }}
               </UntilFresh>
             )}
           </Await>
@@ -401,8 +438,8 @@ function Detail({
             steps={upgradeSteps({
               state: d.state,
               timeline: d.timeline,
-              legalVetoExtended: d.status.guardiansExtendedLegalVeto,
-              guardiansApproved: d.status.guardiansApproval,
+              legalVetoExtended: d.status.zkFoundationExtendedLegalVeto,
+              zkFoundationApproved: d.status.zkFoundationApproval,
               now,
               // Its time, once the execution transaction is found.
               executed:
@@ -477,8 +514,13 @@ function Detail({
                 <ApprovalGroups
                   title="Approvals"
                   heading="h2"
-                  count={verified.length}
-                  closed={verified.filter((v) => v.state.status === "closed").length}
+                  count={verified.length + ZK_FOUNDATION_STEPS.length}
+                  closed={
+                    verified.filter((v) => v.state.status === "closed").length +
+                    ZK_FOUNDATION_STEPS.filter(
+                      (step) => zkFoundationStepStatus(step.key, d.state, d.status) === "closed"
+                    ).length
+                  }
                 >
                   {verified.map((first) => (
                     <UntilFresh key={first.key} stale={first.set.stale === true} fresh={freshSets}>
@@ -516,6 +558,25 @@ function Detail({
                       }}
                     </UntilFresh>
                   ))}
+                  <Suspense
+                    fallback={
+                      <ZkFoundationRowsNote>
+                        Reading the ZK Foundation's approval and legal veto extension…
+                      </ZkFoundationRowsNote>
+                    }
+                  >
+                    <Await
+                      resolve={zkFoundation}
+                      errorElement={
+                        <ZkFoundationRowsNote>
+                          The ZK Foundation's approval and legal veto extension could not be read.
+                          Refresh to retry.
+                        </ZkFoundationRowsNote>
+                      }
+                    >
+                      {(steps) => <ZkFoundationRows zkFoundation={steps} />}
+                    </Await>
+                  </Suspense>
                 </ApprovalGroups>
               )}
             </Await>
@@ -583,8 +644,12 @@ function HeldApprovalsView({
       <ApprovalGroups
         title="Approvals"
         heading="h2"
-        count={held.sets.length}
-        closed={held.sets.filter((s) => s.state.status === "closed").length}
+        count={held.sets.length + (held.zkFoundation?.steps.length ?? 0)}
+        closed={
+          [...held.sets, ...(held.zkFoundation?.steps ?? [])].filter(
+            (s) => s.state.status === "closed"
+          ).length
+        }
       >
         {held.sets.map((s) => (
           <SignatureSetCard
@@ -598,6 +663,7 @@ function HeldApprovalsView({
             refresh={refresh}
           />
         ))}
+        {held.zkFoundation && <ZkFoundationRows zkFoundation={held.zkFoundation} />}
       </ApprovalGroups>
     </AsOfContent>
   );

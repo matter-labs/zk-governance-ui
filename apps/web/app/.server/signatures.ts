@@ -1,4 +1,4 @@
-import { guardiansAbi, isErc1271Accepted, safeAbi } from "@/common/abis";
+import { isErc1271Accepted, safeAbi, securityCouncilAbi } from "@/common/abis";
 import { type MemberSignature, encodeMultisigSignature, sortBySigner } from "@/common/execution";
 import { memberLabel } from "@/common/labels";
 import {
@@ -77,7 +77,7 @@ import { type WatchItem, onPageLoad, presence } from "./sync/presence";
 import { noteContent, touchRev } from "./sync/revs";
 
 // The verification core. A signature counts only if the contract that will consume it accepts it in
-// an eth_call: Multisig.checkSignatures for council/guardian members, and the Safe's own
+// an eth_call: Multisig.checkSignatures for Security Council members, and the Safe's own
 // EIP-1271 isValidSignature for the ZK Foundation (exactly what EmergencyUpgradeBoard calls).
 // The Safe Transaction Service is just one place to look for candidates.
 //
@@ -89,9 +89,9 @@ import { noteContent, touchRev } from "./sync/revs";
 // from Safe copies under the page rule; JSON only ever gets the strict result.
 
 export type SignatureCheck =
-  // SecurityCouncil / Guardians actions: checkSignatures(digest, signers, signatures, threshold)
+  // SecurityCouncil actions: checkSignatures(digest, signers, signatures, threshold)
   | { kind: "multisig"; contract: Address }
-  // EmergencyUpgradeBoard → SecurityCouncil/Guardians.isValidSignature(digest, abi.encode(signers, sigs))
+  // EmergencyUpgradeBoard → SecurityCouncil.isValidSignature(digest, abi.encode(signers, sigs))
   | { kind: "multisig-1271"; contract: Address }
   // EmergencyUpgradeBoard → ZK Foundation Safe.isValidSignature(digest, signature)
   | { kind: "safe-1271"; contract: Address };
@@ -224,7 +224,7 @@ async function accepts(
       // that block (requireCode).
       await callFn({
         address: check.contract,
-        abi: guardiansAbi,
+        abi: securityCouncilAbi,
         functionName: "checkSignatures",
         args: [
           digest,
@@ -1514,8 +1514,8 @@ export type Simulation = (
   watch?: WatchItem;
 };
 
-// A funded stand-in sender, so payable calls (the L2 veto forwards txMintValue) can be simulated,
-// at the current gas price: its balance covers the value and gas at any plausible price.
+// A funded stand-in sender, so payable calls can be simulated, at the current gas price: its
+// balance covers the value and gas at any plausible price.
 const SIMULATION_SENDER: Address = "0x000000000000000000000000000000000000dEaD";
 const SIMULATION_FUNDS = 10n ** 24n;
 
@@ -1533,8 +1533,8 @@ export type SimulateOptions = {
 
 /**
  * eth_call of the execution transaction against the latest state, at the current gas price (a
- * contract reading tx.gasprice runs as it will when sent: Era's Mailbox prices a veto's L2
- * transaction with it, and a signed txMintValue below that cost reverts). Nothing is sent.
+ * contract reading tx.gasprice runs as it will when sent: Era's Mailbox prices an L1 → L2
+ * transaction with it). Nothing is sent.
  */
 export async function simulate(
   execution: {

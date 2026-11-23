@@ -3,25 +3,29 @@ import { type Hex, parseAbi } from "viem";
 // Minimal ABIs for the calls this app makes, written out so they can be reviewed at a glance.
 // Signatures match the deployed contracts (zk-governance l1-contracts) and Safe v1.3.0+.
 
+// The ProtocolUpgradeHandler after ZIP-19 (zk-governance #51): the ZK Foundation's Safe holds the
+// role the Guardians had (it approves upgrades and extends the legal veto itself, msg.sender being
+// the Safe); the upgrade status keeps the same storage layout.
 export const upgradeHandlerAbi = parseAbi([
   "struct Call { address target; uint256 value; bytes data; }",
   "struct UpgradeProposal { Call[] calls; address executor; bytes32 salt; }",
   "function securityCouncil() view returns (address)",
-  "function guardians() view returns (address)",
-  "function emergencyUpgradeBoard() view returns (address)",
-  // Only the handler without Guardians has it (zk-governance #51): asked to tell that one apart.
   "function zkFoundation() view returns (address)",
+  "function emergencyUpgradeBoard() view returns (address)",
   "function L2_PROTOCOL_GOVERNOR() view returns (address)",
   "function upgradeState(bytes32 _id) view returns (uint8)",
-  "function upgradeStatus(bytes32 _id) view returns (uint48 creationTimestamp, uint48 securityCouncilApprovalTimestamp, bool guardiansApproval, bool guardiansExtendedLegalVeto, bool executed)",
+  "function upgradeStatus(bytes32 _id) view returns (uint48 creationTimestamp, uint48 securityCouncilApprovalTimestamp, bool zkFoundationApproval, bool zkFoundationExtendedLegalVeto, bool executed)",
   "function protocolFrozenUntil() view returns (uint256)",
   "function lastFreezeStatusInUpgradeCycle() view returns (uint8)",
   "function startUpgrade(uint256 _l2BatchNumber, uint256 _l2MessageIndex, uint16 _l2TxNumberInBatch, bytes32[] _proof, UpgradeProposal _proposal)",
   "function execute(UpgradeProposal _proposal) payable",
+  // Called by the ZK Foundation Safe itself (a Safe transaction), never with member signatures.
+  "function approveUpgradeZkFoundation(bytes32 _id)",
+  "function extendLegalVeto(bytes32 _id)",
   "event UpgradeStarted(bytes32 indexed _id, UpgradeProposal _proposal)",
   "event UpgradeLegalVetoExtended(bytes32 indexed _id)",
   "event UpgradeApprovedBySecurityCouncil(bytes32 indexed _id)",
-  "event UpgradeApprovedByGuardians(bytes32 indexed _id)",
+  "event UpgradeApprovedByZkFoundation(bytes32 indexed _id)",
   "event UpgradeExecuted(bytes32 indexed _id)",
   "event EmergencyUpgradeExecuted(bytes32 indexed _id)",
   "event ChangeSecurityCouncil(address indexed _securityCouncilBefore, address indexed _securityCouncilAfter)",
@@ -30,7 +34,7 @@ export const upgradeHandlerAbi = parseAbi([
   "event Unfreeze()",
 ]);
 
-// Shared by SecurityCouncil and Guardians (both extend Multisig).
+// SecurityCouncil (extends Multisig).
 const multisigItems = [
   "function PROTOCOL_UPGRADE_HANDLER() view returns (address)",
   "function members(uint256) view returns (address)",
@@ -58,28 +62,21 @@ export const securityCouncilAbi = parseAbi([
   "function setSoftFreezeThreshold(uint256 _threshold, uint256 _validUntil, address[] _signers, bytes[] _signatures)",
 ]);
 
-export const guardiansAbi = parseAbi([
-  ...multisigItems,
-  "struct L2GovernorProposal { address[] targets; uint256[] values; bytes[] calldatas; string description; }",
-  "struct TxRequest { address to; uint256 l2GasLimit; uint256 l2GasPerPubdataByteLimit; address refundRecipient; uint256 txMintValue; }",
-  "function APPROVE_UPGRADE_GUARDIANS_THRESHOLD() view returns (uint256)",
-  "function EXTEND_LEGAL_VETO_THRESHOLD() view returns (uint256)",
-  "function CANCEL_L2_GOVERNOR_PROPOSAL_THRESHOLD() view returns (uint256)",
-  "function nonce() view returns (uint256)",
-  "function hashL2Proposal(L2GovernorProposal _l2Proposal) pure returns (uint256)",
-  "function approveUpgradeGuardians(bytes32 _id, address[] _signers, bytes[] _signatures)",
-  "function extendLegalVeto(bytes32 _id, address[] _signers, bytes[] _signatures)",
-  "function cancelL2GovernorProposal(L2GovernorProposal _l2Proposal, TxRequest _txRequest, address[] _signers, bytes[] _signatures) payable",
-]);
-
+// The two-party EmergencyUpgradeBoard (Security Council + ZK Foundation) installed by ZIP-19.
 export const emergencyUpgradeBoardAbi = parseAbi([
   "struct Call { address target; uint256 value; bytes data; }",
   "function PROTOCOL_UPGRADE_HANDLER() view returns (address)",
   "function ZK_FOUNDATION_SAFE() view returns (address)",
   "function SECURITY_COUNCIL() view returns (address)",
-  "function GUARDIANS() view returns (address)",
   "function eip712Domain() view returns (bytes1 fields, string name, string version, uint256 chainId, address verifyingContract, bytes32 salt, uint256[] extensions)",
-  "function executeEmergencyUpgrade(Call[] _calls, bytes32 _salt, bytes _guardiansSignatures, bytes _securityCouncilSignatures, bytes _zkFoundationSignatures)",
+  "function executeEmergencyUpgrade(Call[] _calls, bytes32 _salt, bytes _securityCouncilSignatures, bytes _zkFoundationSignatures)",
+]);
+
+// Only to read the emergency upgrades executed before ZIP-19, through the boards that also took a
+// third signature blob (its first one, which nothing here reads). Never used to build a call.
+export const earlierEmergencyUpgradeBoardAbi = parseAbi([
+  "struct Call { address target; uint256 value; bytes data; }",
+  "function executeEmergencyUpgrade(Call[] _calls, bytes32 _salt, bytes _otherSignatures, bytes _securityCouncilSignatures, bytes _zkFoundationSignatures)",
 ]);
 
 // Safe singleton (v1.3.0+) and CompatibilityFallbackHandler functions reachable on a Safe proxy.

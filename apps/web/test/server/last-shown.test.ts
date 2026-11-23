@@ -296,7 +296,6 @@ describe("where it is used", () => {
       "app/routes/_index/_route.tsx",
       "app/routes/app/emergency/$id/_route.tsx",
       "app/routes/app/emergency/_index/_route.tsx",
-      "app/routes/app/l2-cancellations/_index/_route.tsx",
       "app/routes/app/proposals/$id/_route.tsx",
       "app/routes/app/proposals/_index/_route.tsx",
     ]);

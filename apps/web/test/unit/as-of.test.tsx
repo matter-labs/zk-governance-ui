@@ -37,7 +37,6 @@ vi.mock("@/.server/flows/emergency", () => ({
   loadEmergencyUpgrade: vi.fn(),
 }));
 vi.mock("@/.server/flows/freeze", () => ({ loadFreezeList: vi.fn() }));
-vi.mock("@/.server/flows/l2-veto", () => ({ loadL2VetoList: vi.fn() }));
 vi.mock("@/.server/governance", () => ({ governance: vi.fn() }));
 vi.mock("@/.server/signatures", () => ({ simulate: vi.fn() }));
 vi.mock("@/.server/rpc", () => ({ network: vi.fn(), l1: {} }));
@@ -46,7 +45,6 @@ const { default: Home } = await import("@/routes/_index/_route");
 const { default: Upgrades } = await import("@/routes/app/proposals/_index/_route");
 const { default: Upgrade } = await import("@/routes/app/proposals/$id/_route");
 const { default: Emergency } = await import("@/routes/app/emergency/$id/_route");
-const { default: Vetoes } = await import("@/routes/app/l2-cancellations/_index/_route");
 
 const ADDRESS = "0x0000000000000000000000000000000000000001";
 const ID = `0x${"ab".repeat(32)}`;
@@ -100,7 +98,7 @@ const governance = {
   latestBlock: { number: AS_OF.block, timestamp: AS_OF.timestamp },
   upgradeHandler: ADDRESS,
   securityCouncil: { address: ADDRESS },
-  guardians: { address: ADDRESS },
+  zkFoundation: ADDRESS,
   emergencyUpgradeBoard: { address: ADDRESS },
 };
 
@@ -120,8 +118,8 @@ const upgrade = (asOf?: typeof AS_OF) => ({
   status: {
     creationTimestamp: 1_780_000_000,
     securityCouncilApprovalTimestamp: 1_780_100_000,
-    guardiansApproval: false,
-    guardiansExtendedLegalVeto: false,
+    zkFoundationApproval: false,
+    zkFoundationExtendedLegalVeto: false,
     executed: false,
   },
   timeline: {
@@ -143,6 +141,7 @@ const upgradeData = (detail: Promise<unknown>, freshDetail: Promise<unknown>) =>
   freshSets: pending(),
   setEvidence: pending(),
   execution: pending(),
+  zkFoundation: pending(),
   l2Proposal: pending(),
   startedCheck: null,
 });
@@ -310,7 +309,7 @@ describe("lists after a pause", () => {
         stateLabel: "Executed",
         createdAt: 1_780_000_000,
         approvedBySecurityCouncil: true,
-        approvedByGuardians: false,
+        approvedByZkFoundation: false,
         legalVetoExtended: false,
       },
     ],
@@ -357,8 +356,6 @@ describe("lists after a pause", () => {
       emergencyFresh: pending(),
       freeze: pending(),
       freezeFresh: pending(),
-      vetoes: pending(),
-      vetoesFresh: pending(),
     });
     const row = screen.getByTestId("flow-upgrades");
     expect(await within(row).findByTestId("summary-note")).toHaveTextContent(
@@ -390,8 +387,6 @@ describe("lists after a pause", () => {
         emergencyAfter: after.promise,
         freeze: pending(),
         freezeFresh: pending(),
-        vetoes: pending(),
-        vetoesFresh: pending(),
       });
       const row = screen.getByTestId("flow-emergency");
       expect(await within(row).findByTestId("summary-note")).toHaveTextContent(
@@ -422,47 +417,5 @@ describe("lists after a pause", () => {
       }
       view.unmount();
     }
-  });
-
-  it("the signed vetoes: labelled with their block and Safe copies' age, no Check Safe now, in no colour", async () => {
-    const signed = {
-      vetoes: [
-        {
-          digest: `0x${"ee".repeat(32)}`,
-          governor: ADDRESS,
-          governorName: "Token governor",
-          l2ProposalId: "123456789",
-          l2GasLimit: "1",
-          l2GasPerPubdataByteLimit: "1",
-          refundRecipient: ADDRESS,
-          txMintValue: "0",
-          nonce: "3",
-          reportedSigners: 2,
-          state: { status: "done", detail: "Vetoed", txHash: null },
-        },
-      ],
-      errors: [],
-      anomalies: 0,
-      safeFetchedAt: "2026-10-01T10:00:00.000Z",
-      stale: true,
-      asOf: AS_OF,
-    };
-    const fresh = deferred<unknown>();
-    show(Vetoes, {
-      signed: Promise.resolve(signed),
-      freshSigned: fresh.promise,
-      vetoable: pending(),
-      freshVetoable: pending(),
-    });
-    const note = await screen.findByTestId("set-stale");
-    expect(note).toHaveTextContent("Verified at block #21,000,000 · re-verifying");
-    expect(note).toHaveTextContent(/Safe copies from .+ · refreshing/);
-    expect(screen.queryByRole("button", { name: /Check Safe now/ })).toBeNull();
-    expect(screen.getByTestId("vetoes").closest("[data-stale]")).toHaveClass("grayscale");
-    await act(async () =>
-      fresh.resolve({ ...signed, stale: false, asOf: undefined, safeFetchedAt: null })
-    );
-    expect(screen.queryByTestId("set-stale")).toBeNull();
-    expect(screen.getByTestId("vetoes").closest(".grayscale")).toBeNull();
   });
 });

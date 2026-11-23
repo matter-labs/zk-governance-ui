@@ -35,7 +35,6 @@ import { privateKeyToAccount } from "viem/accounts";
 import { mainnet, sepolia } from "viem/chains";
 import {
   emergencyUpgradeBoardAbi,
-  guardiansAbi,
   safeAbi,
   securityCouncilAbi,
   upgradeHandlerAbi,
@@ -47,15 +46,18 @@ const CACHE = at("../../.cache/sepolia-test");
 const KEY_FILE = process.env.DEPLOYER_KEY_FILE ?? `${CACHE}/deployer.key`;
 const OWNER = (process.env.SAFE_OWNER ?? "0xF378708B88841Abb63e2316E4Fc8f29469beE885") as Address;
 
-// zk-governance at the commit of the contracts mainnet runs (the 8-member Security Council). Compiled
-// as mainnet's were: SecurityCouncil and EmergencyUpgradeBoard without the optimizer, Guardians, the
-// handler and its proxy with 200 runs. Their code then equals mainnet's but for immutables and
-// metadata, and the handler's two periods (TestnetProtocolUpgradeHandler: no legal veto, no delay).
+// zk-governance at the commit of the contracts mainnet runs after ZIP-19 (vb/remove-guardians-audit-
+// fixes: the 8-member Security Council, the ZK Foundation in the handler, the two-party board).
+// Compiled with its foundry.toml (optimizer, 10,000,000 runs), as mainnet's were: their code then
+// equals mainnet's but for immutables and metadata, and the handler's two periods
+// (TestnetProtocolUpgradeHandler: no legal veto, no delay).
 const ZK_GOVERNANCE = {
   repo: "https://github.com/zksync-association/zk-governance.git",
-  commit: "58df93fc38a0d439c9d2dff4563779251f1c0b64",
-  dir: process.env.ZK_GOVERNANCE_DIR ?? `${CACHE}/zk-governance`,
+  commit: "d9bd203943434a6a78c382f844b05cd6745066ac",
+  dir: process.env.ZK_GOVERNANCE_DIR ?? `${CACHE}/zk-governance-zip19`,
 };
+// ZKsync Era Sepolia's chain id: the handler's ERA_CHAIN_ID, the stub's one chain.
+const ERA_CHAIN_ID = 300n;
 // ZkProtocolGovernor.timelock() on ZKsync Era Sepolia (governor 0x5a68…): the sender of the L2 → L1
 // message that starts an upgrade, as the app's Sepolia L2 governors expect.
 const L2_PROTOCOL_GOVERNOR: Address = "0xa0eD7885B408961430F89d797cD1cc87530D8fBe";
@@ -118,25 +120,25 @@ function build() {
     `${root}/src/sepolia-test/Proxy.sol`,
     'import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";\n'
   );
-  const forge = (out: string, ...flags: string[]) =>
-    execFileSync(
-      "forge",
-      ["build", "--root", root, "--skip", "test", "--out", `${CACHE}/${out}`, ...flags],
-      { stdio: ["ignore", "ignore", "inherit"] }
-    );
-  forge("out-plain", "--cache-path", `${CACHE}/cache-plain`);
-  forge(
-    "out-opt200",
-    "--optimize",
-    "--optimizer-runs",
-    "200",
-    "--cache-path",
-    `${CACHE}/cache-opt200`
+  execFileSync(
+    "forge",
+    [
+      "build",
+      "--root",
+      root,
+      "--skip",
+      "test",
+      "--out",
+      `${CACHE}/out-zip19`,
+      "--cache-path",
+      `${CACHE}/cache-zip19`,
+    ],
+    { stdio: ["ignore", "ignore", "inherit"] }
   );
 }
 
-function artifact(out: "out-plain" | "out-opt200", name: string): { abi: Abi; bytecode: Hex } {
-  const a = JSON.parse(readFileSync(`${CACHE}/${out}/${name}.sol/${name}.json`, "utf8"));
+function artifact(name: string): { abi: Abi; bytecode: Hex } {
+  const a = JSON.parse(readFileSync(`${CACHE}/out-zip19/${name}.sol/${name}.json`, "utf8"));
   return { abi: a.abi, bytecode: a.bytecode.object };
 }
 
@@ -154,17 +156,12 @@ async function confirm(hash: Hex, what: string) {
 
 // ---- Member Safes: 1-of-1, owned by OWNER, created through Safe's own factory -------------------
 
-type Role = "securityCouncil" | "guardians" | "zkFoundation";
+type Role = "securityCouncil" | "zkFoundation";
 const MEMBERS: { role: Role; index: number; label: string }[] = [
   ...Array.from({ length: 8 }, (_, i) => ({
     role: "securityCouncil" as const,
     index: i,
     label: `Security Council member ${i + 1}`,
-  })),
-  ...Array.from({ length: 8 }, (_, i) => ({
-    role: "guardians" as const,
-    index: i,
-    label: `Guardian ${i + 1}`,
   })),
   { role: "zkFoundation", index: 0, label: "ZK Foundation" },
 ];
@@ -223,7 +220,7 @@ async function deploySafes() {
   return safes;
 }
 
-// ---- Governance: the stub, the handler (implementation and proxy), the councils, the board ------
+// ---- Governance: the stub, the handler (implementation and proxy), the council, the board -------
 
 type Plan = {
   firstNonce: number;
@@ -231,7 +228,6 @@ type Plan = {
   handlerImplementation: Address;
   handler: Address;
   securityCouncil: Address;
-  guardians: Address;
   emergencyUpgradeBoard: Address;
   handlerBlock?: number;
 };
@@ -240,7 +236,6 @@ const ORDER = [
   "handlerImplementation",
   "handler",
   "securityCouncil",
-  "guardians",
   "emergencyUpgradeBoard",
 ] as const;
 
@@ -248,8 +243,8 @@ async function deployGovernance(
   safes: Awaited<ReturnType<typeof deploySafes>>,
   planFile: string
 ): Promise<Plan & { handlerBlock: number }> {
-  // Each address follows from the deployer's nonce, so the proxy is initialized with the councils'
-  // addresses and is its own ProxyAdmin's owner, as on mainnet, before they exist.
+  // Each address follows from the deployer's nonce, so the proxy is initialized with the council's
+  // and the board's addresses and is its own ProxyAdmin's owner, as on mainnet, before they exist.
   let plan: Plan;
   if (existsSync(planFile)) plan = JSON.parse(readFileSync(planFile, "utf8"));
   else {
@@ -268,37 +263,33 @@ async function deployGovernance(
       .map((s) => s.address)
       .sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
   const zkFoundation = safes.find((s) => s.role === "zkFoundation")?.address as Address;
-  const stub = artifact("out-plain", "ZKsyncTestStub");
-  const handlerArtifact = artifact("out-opt200", "TestnetProtocolUpgradeHandler");
+  const stub = artifact("ZKsyncTestStub");
+  const handlerArtifact = artifact("TestnetProtocolUpgradeHandler");
   const deploys: Record<(typeof ORDER)[number], { abi: Abi; bytecode: Hex; args: unknown[] }> = {
     stub: { ...stub, args: [] },
     handlerImplementation: {
       ...handlerArtifact,
-      args: [L2_PROTOCOL_GOVERNOR, ...Array(7).fill(plan.stub)],
+      args: [L2_PROTOCOL_GOVERNOR, ...Array(7).fill(plan.stub), ERA_CHAIN_ID],
     },
     handler: {
-      ...artifact("out-opt200", "TransparentUpgradeableProxy"),
+      ...artifact("TransparentUpgradeableProxy"),
       args: [
         plan.handlerImplementation,
         plan.handler,
         encodeFunctionData({
           abi: handlerArtifact.abi,
           functionName: "initialize",
-          args: [plan.securityCouncil, plan.guardians, plan.emergencyUpgradeBoard],
+          args: [plan.securityCouncil, zkFoundation, plan.emergencyUpgradeBoard],
         }),
       ],
     },
     securityCouncil: {
-      ...artifact("out-plain", "SecurityCouncil"),
+      ...artifact("SecurityCouncil"),
       args: [plan.handler, sorted("securityCouncil")],
     },
-    guardians: {
-      ...artifact("out-opt200", "Guardians"),
-      args: [plan.handler, plan.stub, sorted("guardians")],
-    },
     emergencyUpgradeBoard: {
-      ...artifact("out-plain", "EmergencyUpgradeBoard"),
-      args: [plan.handler, plan.securityCouncil, plan.guardians, zkFoundation],
+      ...artifact("EmergencyUpgradeBoard"),
+      args: [plan.handler, plan.securityCouncil, zkFoundation],
     },
   };
   for (const [i, key] of ORDER.entries()) {
@@ -333,12 +324,13 @@ async function check(gov: Plan, safes: Awaited<ReturnType<typeof deploySafes>>) 
       throw new Error(`${what} is ${actual}, expected ${expected}`);
   };
   const h = gov.handler;
+  const zkFoundation = safes.find((s) => s.role === "zkFoundation")?.address as Address;
   expect(
     "handler.securityCouncil()",
     await read(h, upgradeHandlerAbi, "securityCouncil"),
     gov.securityCouncil
   );
-  expect("handler.guardians()", await read(h, upgradeHandlerAbi, "guardians"), gov.guardians);
+  expect("handler.zkFoundation()", await read(h, upgradeHandlerAbi, "zkFoundation"), zkFoundation);
   expect(
     "handler.emergencyUpgradeBoard()",
     await read(h, upgradeHandlerAbi, "emergencyUpgradeBoard"),
@@ -356,25 +348,22 @@ async function check(gov: Plan, safes: Awaited<ReturnType<typeof deploySafes>>) 
     await read(proxyAdmin, parseAbi(["function owner() view returns (address)"]), "owner"),
     h
   );
-  for (const [role, multisig, abi] of [
-    ["securityCouncil", gov.securityCouncil, securityCouncilAbi],
-    ["guardians", gov.guardians, guardiansAbi],
-  ] as const) {
-    expect(
-      `${role}.PROTOCOL_UPGRADE_HANDLER()`,
-      await read(multisig, abi, "PROTOCOL_UPGRADE_HANDLER"),
-      h
-    );
-    const members = safes.filter((s) => s.role === role).map((s) => s.address);
-    const onChain = await Promise.all(
-      members.map((_, i) => read<Address>(multisig, abi, "members", [BigInt(i)]))
-    );
-    if (
-      new Set(onChain.map((a) => a.toLowerCase())).size !== 8 ||
-      !members.every((m) => onChain.some((a) => isAddressEqual(a, m)))
+  expect(
+    "securityCouncil.PROTOCOL_UPGRADE_HANDLER()",
+    await read(gov.securityCouncil, securityCouncilAbi, "PROTOCOL_UPGRADE_HANDLER"),
+    h
+  );
+  const members = safes.filter((s) => s.role === "securityCouncil").map((s) => s.address);
+  const onChain = await Promise.all(
+    members.map((_, i) =>
+      read<Address>(gov.securityCouncil, securityCouncilAbi, "members", [BigInt(i)])
     )
-      throw new Error(`${role}.members() differ from its Safes`);
-  }
+  );
+  if (
+    new Set(onChain.map((a) => a.toLowerCase())).size !== 8 ||
+    !members.every((m) => onChain.some((a) => isAddressEqual(a, m)))
+  )
+    throw new Error("securityCouncil.members() differ from its Safes");
   const eub = gov.emergencyUpgradeBoard;
   expect(
     "board.PROTOCOL_UPGRADE_HANDLER()",
@@ -387,14 +376,9 @@ async function check(gov: Plan, safes: Awaited<ReturnType<typeof deploySafes>>) 
     gov.securityCouncil
   );
   expect(
-    "board.GUARDIANS()",
-    await read(eub, emergencyUpgradeBoardAbi, "GUARDIANS"),
-    gov.guardians
-  );
-  expect(
     "board.ZK_FOUNDATION_SAFE()",
     await read(eub, emergencyUpgradeBoardAbi, "ZK_FOUNDATION_SAFE"),
-    safes.find((s) => s.role === "zkFoundation")?.address as Address
+    zkFoundation
   );
   for (const safe of safes) {
     const owners = await read<Address[]>(safe.address, safeAbi, "getOwners");
@@ -463,7 +447,8 @@ async function main() {
   console.log("Member Safes");
   const safes = await deploySafes();
   console.log("Governance contracts");
-  const gov = await deployGovernance(safes, `${CACHE}/plan${suffix}.json`);
+  // A plan of its own: the deployment from before ZIP-19 (with Guardians) is not resumed.
+  const gov = await deployGovernance(safes, `${CACHE}/plan-zip19${suffix}.json`);
   const proxyAdmin = await check(gov, safes);
   console.log("Test upgrades");
   const upgrades = await startSeeds(gov);
@@ -482,27 +467,24 @@ async function main() {
       protocolUpgradeHandlerImplementation: gov.handlerImplementation,
       proxyAdmin,
       securityCouncil: gov.securityCouncil,
-      guardians: gov.guardians,
       emergencyUpgradeBoard: gov.emergencyUpgradeBoard,
       zksyncStub: gov.stub,
     },
     safes: {
       securityCouncil: safes.filter((s) => s.role === "securityCouncil").map(memberSafe),
-      guardians: safes.filter((s) => s.role === "guardians").map(memberSafe),
       zkFoundation: memberSafe(
         safes.find((s) => s.role === "zkFoundation") as (typeof safes)[number]
       ),
     },
     codeHashes: {
       securityCouncil: await codeHash(gov.securityCouncil),
-      guardians: await codeHash(gov.guardians),
       emergencyUpgradeBoard: await codeHash(gov.emergencyUpgradeBoard),
       safeProxy: await codeHash(safes[0]?.address as Address),
     },
     upgrades: upgrades.map(({ title, id }) => ({ title, id })),
   };
   writeFileSync(at(`./deployment${suffix}.json`), `${JSON.stringify(deployment, null, 2)}\n`);
-  // Safe{Wallet} → Address book → Import: names for the 17 Safes.
+  // Safe{Wallet} → Address book → Import: names for the 9 Safes.
   writeFileSync(
     at(`./safe-address-book${suffix}.csv`),
     `address,name,chainId\n${safes.map((s) => `${s.address},${s.label} (test),${chainId}`).join("\n")}\n`

@@ -1,7 +1,7 @@
 import { type Hex, numberToHex, pad, zeroAddress } from "viem";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ChainLog, PUH_TOPICS, puhHistory } from "../support/fake-chain";
-import { G_MEMBERS, L1, SC_MEMBERS, type UpgradeOnChain, fakeL1 } from "../support/fake-l1";
+import { L1, SC_MEMBERS, type UpgradeOnChain, fakeL1 } from "../support/fake-l1";
 
 // The first visitor of a freshly started server opens an upgrade page while the boot warm-up reads
 // governance, the log index and (with a key) the member Safes at low priority: the page's listings
@@ -134,7 +134,7 @@ afterEach(() => {
 describe("the first visitor during the boot warm-up", () => {
   it("gets an upgrade's signatures about when the log index is ready, not the index wait plus the Safe floor", async () => {
     const { safe } = boot();
-    const members = [...SC_MEMBERS, ...G_MEMBERS].map((m) => m.toLowerCase());
+    const members = SC_MEMBERS.map((m) => m.toLowerCase());
     // The server starts: the warm-up runs (the index backfill takes 2.5 s)...
     const warm = prewarm("boot");
     // ...and the first visitor opens the upgrade page right away.
@@ -161,8 +161,6 @@ describe("the first visitor during the boot warm-up", () => {
     expect(Math.max(...safe.requests.map((r) => r.concurrent))).toBeLessThanOrEqual(4);
     expect(verified.map((s) => s.set.members.map((m) => m.status))).toEqual([
       ["missing", "missing", "missing"],
-      ["missing", "missing", "missing"],
-      ["missing", "missing", "missing"],
     ]);
     await settledAt(warm);
   });
@@ -174,15 +172,15 @@ describe("the first visitor during the boot warm-up", () => {
     const overview = await settledAt(loading);
     const signatures = await settledAt((await loading).sets);
     expect(overview).toBeGreaterThanOrEqual(BACKFILL_MS);
-    // 6 listings at 220 ms spacing were done long before the index.
+    // 3 listings at 220 ms spacing were done long before the index.
     expect(signatures - overview).toBeLessThan(200);
-    expect(safe.requests).toHaveLength(6);
+    expect(safe.requests).toHaveLength(3);
     expect(Math.max(...safe.requests.map((r) => r.at - NOW))).toBeLessThan(1_500);
   });
 
   it("reads the page's member Safes ahead of the warm-up's queued background reads", async () => {
     const { safe } = boot();
-    const members = [...SC_MEMBERS, ...G_MEMBERS].map((m) => m.toLowerCase());
+    const members = SC_MEMBERS.map((m) => m.toLowerCase());
     const { warmSafeListing } = await import("@/.server/safe/store");
     // Background reads of 17 other Safes are queued first, then the page asks for its members.
     const others = Array.from(

@@ -7,9 +7,6 @@ import * as emergencyIndex from "@/routes/app/emergency/_index/_route";
 import * as emergencyNew from "@/routes/app/emergency/new/_route";
 import * as freezeAction from "@/routes/app/freeze/$action/_route";
 import * as freezeIndex from "@/routes/app/freeze/_index/_route";
-import * as vetoId from "@/routes/app/l2-cancellations/$id/_route";
-import * as vetoIndex from "@/routes/app/l2-cancellations/_index/_route";
-import * as vetoNew from "@/routes/app/l2-cancellations/new/_route";
 import * as proposalId from "@/routes/app/proposals/$id/_route";
 import * as proposalIndex from "@/routes/app/proposals/_index/_route";
 import * as proposalNew from "@/routes/app/proposals/new/_route";
@@ -105,9 +102,6 @@ export const routes = [
       route("routes/app/emergency/$id", "app/emergency/:id", emergencyId as Module),
       route("routes/app/freeze/_index", "app/freeze", freezeIndex as Module),
       route("routes/app/freeze/$action", "app/freeze/:action", freezeAction as Module),
-      route("routes/app/l2-cancellations/_index", "app/l2-cancellations", vetoIndex as Module),
-      route("routes/app/l2-cancellations/new", "app/l2-cancellations/new", vetoNew as Module),
-      route("routes/app/l2-cancellations/$id", "app/l2-cancellations/:id", vetoId as Module),
       route("routes/app/transactions.$hash", "app/transactions/:hash", transaction as Module),
       route("routes/settings", "settings", settingsModule),
       route("routes/resources+/refresh", "resources/refresh", refresh as Module),

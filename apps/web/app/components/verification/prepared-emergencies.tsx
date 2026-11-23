@@ -108,7 +108,6 @@ export function PreparedEmergencies({
                   title="As reported by Safe; open the upgrade to verify each signature on-chain"
                 >
                   <Badge>Security Council {signing.reported.securityCouncil}</Badge>
-                  <Badge>Guardians {signing.reported.guardians}</Badge>
                   <Badge>
                     {signing.reported.zkFoundation ? "Foundation signed" : "Foundation pending"}
                   </Badge>
